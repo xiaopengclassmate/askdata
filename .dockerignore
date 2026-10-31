@@ -1,0 +1,12 @@
+.git
+.venv
+__pycache__
+*.pyc
+.env
+.env.local
+db/*.db
+logs/
+web/node_modules
+eval/result-*.json
+eval/run-*.log
+.pytest_cache

@@ -1,0 +1,154 @@
+# AskData · 自然语言数据分析（ChatBI）
+
+用中文提问，自动生成 SQL、在只读沙箱里执行、把结果画成图。
+
+> 简历定位：证明**Python 全栈 + AI 工程化**能力。
+> 和现有的 Java 项目（文档问答）不重复——这里考的是结构化数据、schema 理解与执行安全。
+
+## 为什么不是又一个 RAG 项目
+
+| | 常见 RAG 项目 | 本项目 |
+|---|---|---|
+| 输入 | 文档 | 中文问题 |
+| 核心难点 | 切分、召回 | schema 裁剪、SQL 正确性、执行安全 |
+| 出问题的方式 | 答不准 | **执行了不该执行的语句 / 查错表 / 把取消单算进营收** |
+| 能讲深的地方 | 召回率 | 沙箱、幂等口径、错误自修复 |
+
+「大模型生成的 SQL 是外部输入」——这句话是所有设计的起点。
+
+## 架构
+
+```
+                 ┌──────────────────────────────────────────────┐
+  中文问题  ───▶ │ /api/ask                                     │
+                 │  ① 含糊检测（规则）──▶ 直接反问，不调模型     │
+                 │  ② 选表：命中词打分，只投喂相关表 + 口径      │
+                 │  ③ 生成 SQL（DashScope / qwen-plus）         │
+                 │  ④ 四道关卡                                  │
+                 │     安全网关 → 语义层 → EXPLAIN → 只读执行    │
+                 │  ⑤ 报错回喂模型，重试 ≤3 次                   │
+                 └───────────────┬──────────────────────────────┘
+                                 ▼
+                   结果 + SQL + 重试日志 + 建议图型
+                                 ▼
+                 Vue 3 + ECharts（规则选图，不额外调模型）
+```
+
+要点：**关卡在模型之外**。模型可以生成任何 SQL，但决定它能不能跑的是代码。
+
+## 当前进度（2026-11-01）
+
+已跑通并验证：
+
+- [x] 演示业务库 8 张表 / 6000 订单 / 10076 明细 / 496 退款（`db/seed.py`，固定种子可复现）
+- [x] schema 语义目录 `app/schema_catalog.py`（表 / 字段 / 枚举值 / 业务口径 + 少样本）
+- [x] SQL 安全网关 `app/sql_guard.py`：单条 SELECT、关键字黑名单、强制 LIMIT
+- [x] 只读连接（`mode=ro`）+ 执行超时中断（`set_progress_handler`）
+- [x] 语义层 `semantic_layer/retail.yml`：9 个指标口径 + 时间约定 + 已批准 join
+- [x] Text2SQL 主链路：schema 检索 → 生成 → 网关 / 语义 / EXPLAIN 三重校验 → 执行 → 报错自修复
+- [x] 多轮会话：`session_id` 带上最近 2 轮上文（追问"那上个月呢"不用重复说）
+- [x] 含糊问题反问：既没指标也没维度时先问清楚，不硬猜
+- [x] FastAPI 接口：`/health` `/api/schema` `/api/query` `/api/ask` `/api/session/{id}`
+- [x] Vue 3 + ECharts 前端（按需引入，构建产物 575 kB），构建后由 FastAPI 直接托管
+- [x] 单测 45 条（安全网关 / 语义层 / 会话 / 反问 / 链路）
+- [x] 60 条评测集 + 结果集比对脚本 `eval/run_eval.py`（full / baseline 消融）
+- [x] Docker 多阶段构建 + GitHub Actions（push 时跑单测）
+
+冒烟结果：合法 join 查询 6 行 0ms；`DROP TABLE`、`SELECT 1; DELETE ...`、`UPDATE` 全部 400 拦截。
+
+待做：
+
+- [ ] 录 demo GIF
+- [ ] 行级权限（按门店过滤数据）
+- [ ] 换 PostgreSQL 接真实数仓
+
+## 目录
+
+```
+askdata/
+├── app/
+│   ├── config.py            # .env 配置
+│   ├── db.py                # 只读连接 + 超时执行 + EXPLAIN 预编译
+│   ├── schema_catalog.py    # 中文语义目录（喂给模型的 schema 知识）
+│   ├── sql_guard.py         # 安全网关（纯函数，好写单测）
+│   ├── semantic.py          # 语义层加载 + join 白名单校验
+│   ├── clarify.py           # 含糊问题反问（纯规则）
+│   ├── session.py           # 多轮会话上下文（内存 + TTL）
+│   ├── llm.py               # DashScope 兼容接口 + JSON 容错解析
+│   ├── text2sql.py          # 选表 → 生成 → 校验 → 执行 → 自修复 → 选图
+│   └── main.py              # FastAPI 入口（顺带托管前端构建产物）
+├── semantic_layer/
+│   └── retail.yml           # 指标口径 / 时间约定 / 已批准 join
+├── db/
+│   ├── schema.sql           # 8 张表
+│   └── seed.py              # 造数（固定种子）
+├── eval/
+│   ├── questions.yml        # 60 条问题 + 标准 SQL
+│   └── run_eval.py          # 结果集比对，full / baseline 两种模式
+├── tests/                   # 45 条单测
+├── web/                     # Vue 3 + ECharts 前端
+├── .github/workflows/ci.yml # push 时跑单测
+├── Dockerfile               # node 构建前端 → python 运行时，单镜像
+└── requirements.txt
+```
+
+## 跑起来
+
+```bash
+python -m venv .venv
+.venv/Scripts/python.exe -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+.venv/Scripts/python.exe db/seed.py            # 建库灌数
+.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8130
+```
+
+打开 http://127.0.0.1:8130/docs 可以直接调接口。
+
+前端单独开发时：`cd web && npm install && npm run dev`（5175 端口，`/api` 代理到 8130）。
+
+## 部署
+
+```bash
+# 单镜像：node 阶段构建前端，python 阶段跑服务，首次启动自动灌演示库
+export DASHSCOPE_API_KEY=sk-xxx
+docker compose up -d --build
+```
+
+镜像里没有任何密钥：`DASHSCOPE_API_KEY` 只从运行环境读，`.env` 在 `.gitignore` 和 `.dockerignore` 里都排除了。
+
+## 业务口径（写在这里，也写进了 schema 目录）
+
+这几条是模型最容易错、面试官最爱问的地方：
+
+- **实收** = `total_amount - discount_amount`，且必须排除 `status = '已取消'`
+- **成交价**用 `order_item.unit_price`，不是 `product.price`
+- 时间筛选一律用 `orders.paid_at`（取消单为 NULL），不用 `id`
+- **退款金额**只统计 `refund.status = '已退款'`
+- 退款率 = 退款笔数 / 已完成订单数
+
+## 设计要点
+
+1. **schema 不进数据库注释，单独一份 Python 目录**：SQLite 丢注释，且模型要的是业务口径不是类型。
+2. **沙箱是双保险**：语法白名单 + 只读连接。即使模型被注入，最坏也只能读到该看的数据。
+3. **强制 LIMIT**：防止 `SELECT *` 把大表打回内存，也防止前端被百万行拖死。
+4. **错误自修复**：执行报错时把数据库原文回喂模型重试（≤2 次），比调 prompt 更有效。
+
+## 评测结果（2026-11-01）
+
+60 条问题，**结果集完全一致**才算对（列和行都要对上，不看 SQL 长得像不像）。
+
+| 模式 | 通过 | 准确率 | 平均耗时 |
+|---|---|---|---|
+| baseline：裸 schema，无语义层、无校验、不重试 | 39/60 | 65.0% | 2.47s |
+| full：语义层 + 三重校验 + 报错自修复（≤3 次） | 52/60 | **86.7%** | 2.63s |
+
+剩余 8 条**没有一条是算错数**，全是答案形状和标准答案不同：5 条是"多返回了一列指标"（如问最忙的门店，答了门店名 + 订单数），2 条是标签措辞与标准答案不同（「线上渠道」vs「线上」、「覆盖的日期区间」vs「天数」）。严格口径下按错处理，不折算。
+
+baseline 的 21 条失败里，典型错法是：营收漏排除取消单返回 NULL、退款率算成 8.4 而不是 0.08、库存把 30 天日终快照全累加（放大 30 倍）、`p.category` 字段名瞎猜导致编译失败。这几类 full 全拦住了——前三类靠语义层，最后一类靠 `EXPLAIN` 预编译。
+
+## 简历草稿
+
+> **AskData — 自然语言数据分析平台**（个人项目，2026.10，Python 全栈）
+> FastAPI + Vue 3 + ECharts + SQLite。中文提问 → 生成 SQL → 只读沙箱执行 → 自动出图。
+> · 建语义层把 7 个指标口径（公式 + 强制过滤条件）从代码抽成配置，模型只能从已定义口径里挑；配三重校验（安全网关 / 语义 join 白名单 / EXPLAIN 预编译）与报错回喂自修复（≤3 次），自建 60 题结果集比对，准确率 65.0% → 86.7%
+> · 执行安全不依赖模型听话：只读连接 `mode=ro` + 单条 SELECT 白名单 + 强制 LIMIT + `set_progress_handler` 超时中断，DDL/DML、多语句拼接全部拦截
+> · 检索式 schema 裁剪 + 规则选图（不额外调模型），前端按需引入 ECharts 把包体从 1.1 MB 压到 575 kB，构建产物由 FastAPI 直接托管，单镜像部署

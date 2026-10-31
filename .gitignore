@@ -1,0 +1,19 @@
+# 密钥
+.env
+.env.local
+
+# 依赖与缓存
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+web/node_modules/
+
+# 前端构建产物：Dockerfile 里用 node 阶段现构建，不进仓库
+web/dist/
+
+# 数据库与日志
+db/*.db
+db/*.db-journal
+logs/
+eval/run-*.log

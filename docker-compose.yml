@@ -1,0 +1,13 @@
+services:
+  askdata:
+    build: .
+    container_name: askdata
+    ports:
+      - "8130:8130"
+    environment:
+      # 不写进镜像：从宿主机 .env 读，或者 docker compose 前 export
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+      DASHSCOPE_MODEL: ${DASHSCOPE_MODEL:-qwen-plus}
+      QUERY_MAX_ROWS: "200"
+      QUERY_TIMEOUT_SECONDS: "5"
+    restart: unless-stopped

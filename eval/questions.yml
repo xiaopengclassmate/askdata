@@ -1,0 +1,188 @@
+# 评测集：60 条中文问题 + 标准 SQL。
+# 判定方式是「结果集比对」，不是「SQL 字符串像不像」——同一件事有很多种正确写法，
+# 但口径错了结果一定对不上。这是这套评测能说明问题的关键。
+#
+# 分了 7 类，故意覆盖模型最容易翻车的几种问法：
+#   时间口径（上月/近 30 天/同比环比）、金额口径（实收 vs 成交额）、
+#   多表 join、分组排序、比率计算、空结果、库存快照。
+
+- q: 上个月的总营收是多少
+  sql: "SELECT ROUND(SUM(total_amount - discount_amount), 2) FROM orders WHERE status <> '已取消' AND paid_at >= date('now','start of month','-1 month') AND paid_at < date('now','start of month')"
+
+- q: 这个月的订单量有多少
+  sql: "SELECT COUNT(DISTINCT id) FROM orders WHERE status <> '已取消' AND paid_at >= date('now','start of month')"
+
+- q: 最近 30 天的实收金额
+  sql: "SELECT ROUND(SUM(total_amount - discount_amount), 2) FROM orders WHERE status <> '已取消' AND paid_at >= date('now','-30 days')"
+
+- q: 近 7 天的订单量
+  sql: "SELECT COUNT(DISTINCT id) FROM orders WHERE status <> '已取消' AND paid_at >= date('now','-7 days')"
+
+- q: 今年的总营收
+  sql: "SELECT ROUND(SUM(total_amount - discount_amount), 2) FROM orders WHERE status <> '已取消' AND paid_at >= date('now','start of year')"
+
+- q: 上个月的订单量
+  sql: "SELECT COUNT(DISTINCT id) FROM orders WHERE status <> '已取消' AND paid_at >= date('now','start of month','-1 month') AND paid_at < date('now','start of month')"
+
+- q: 全部订单里取消单有多少
+  sql: "SELECT COUNT(*) FROM orders WHERE status = '已取消'"
+
+- q: 客单价是多少
+  sql: "SELECT ROUND(SUM(total_amount - discount_amount) / COUNT(DISTINCT id), 2) FROM orders WHERE status <> '已取消'"
+
+- q: 最近 90 天的客单价
+  sql: "SELECT ROUND(SUM(total_amount - discount_amount) / COUNT(DISTINCT id), 2) FROM orders WHERE status <> '已取消' AND paid_at >= date('now','-90 days')"
+
+- q: 去年全年的营收
+  sql: "SELECT ROUND(SUM(total_amount - discount_amount), 2) FROM orders WHERE status <> '已取消' AND paid_at >= date('now','start of year','-1 year') AND paid_at < date('now','start of year')"
+
+- q: 各门店的营收排名
+  sql: "SELECT s.name, ROUND(SUM(o.total_amount - o.discount_amount), 2) AS revenue FROM orders o JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' GROUP BY s.name ORDER BY revenue DESC"
+
+- q: 最近 30 天各门店的订单量
+  sql: "SELECT s.name, COUNT(DISTINCT o.id) FROM orders o JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' AND o.paid_at >= date('now','-30 days') GROUP BY s.name ORDER BY 2 DESC"
+
+- q: 每个区域的营收
+  sql: "SELECT s.region, ROUND(SUM(o.total_amount - o.discount_amount), 2) FROM orders o JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' GROUP BY s.region ORDER BY 2 DESC"
+
+- q: 华东区的总营收
+  sql: "SELECT ROUND(SUM(o.total_amount - o.discount_amount), 2) FROM orders o JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' AND s.region = '华东'"
+
+- q: 华南区上个月的营收
+  sql: "SELECT ROUND(SUM(o.total_amount - o.discount_amount), 2) FROM orders o JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' AND s.region = '华南' AND o.paid_at >= date('now','start of month','-1 month') AND o.paid_at < date('now','start of month')"
+
+- q: 哪个门店的订单最多
+  sql: "SELECT s.name FROM orders o JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' GROUP BY s.name ORDER BY COUNT(DISTINCT o.id) DESC LIMIT 1"
+
+- q: 深圳的门店有几个
+  sql: "SELECT COUNT(*) FROM store WHERE city = '深圳'"
+
+- q: 各门店的客单价
+  sql: "SELECT s.name, ROUND(SUM(o.total_amount - o.discount_amount) / COUNT(DISTINCT o.id), 2) FROM orders o JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' GROUP BY s.name ORDER BY 2 DESC"
+
+- q: 上个月各门店的营收
+  sql: "SELECT s.name, ROUND(SUM(o.total_amount - o.discount_amount), 2) FROM orders o JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' AND o.paid_at >= date('now','start of month','-1 month') AND o.paid_at < date('now','start of month') GROUP BY s.name ORDER BY 2 DESC"
+
+- q: 最近 7 天营收最高的门店
+  sql: "SELECT s.name FROM orders o JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' AND o.paid_at >= date('now','-7 days') GROUP BY s.name ORDER BY SUM(o.total_amount - o.discount_amount) DESC LIMIT 1"
+
+- q: 销量前 5 的商品
+  sql: "SELECT p.name, SUM(i.quantity) FROM order_item i JOIN product p ON p.id = i.product_id JOIN orders o ON o.id = i.order_id WHERE o.status <> '已取消' GROUP BY p.name ORDER BY 2 DESC LIMIT 5"
+
+- q: 销售额最高的 3 个商品
+  sql: "SELECT p.name, ROUND(SUM(i.amount), 2) FROM order_item i JOIN product p ON p.id = i.product_id JOIN orders o ON o.id = i.order_id WHERE o.status <> '已取消' GROUP BY p.name ORDER BY 2 DESC LIMIT 3"
+
+- q: 各品类的销售额
+  sql: "SELECT c.name, ROUND(SUM(i.amount), 2) FROM order_item i JOIN product p ON p.id = i.product_id JOIN category c ON c.id = p.category_id JOIN orders o ON o.id = i.order_id WHERE o.status <> '已取消' GROUP BY c.name ORDER BY 2 DESC"
+
+- q: 手机数码品类的总销量
+  sql: "SELECT SUM(i.quantity) FROM order_item i JOIN product p ON p.id = i.product_id JOIN category c ON c.id = p.category_id JOIN orders o ON o.id = i.order_id WHERE o.status <> '已取消' AND c.name = '手机数码'"
+
+- q: 在售商品有多少个
+  sql: "SELECT COUNT(*) FROM product WHERE status = '在售'"
+
+- q: 停售的商品有几个
+  sql: "SELECT COUNT(*) FROM product WHERE status = '停售'"
+
+- q: 每个品类的商品数量
+  sql: "SELECT c.name, COUNT(*) FROM product p JOIN category c ON c.id = p.category_id GROUP BY c.name ORDER BY 2 DESC"
+
+- q: 平均售价最高的品类
+  sql: "SELECT c.name FROM product p JOIN category c ON c.id = p.category_id GROUP BY c.name ORDER BY AVG(p.price) DESC LIMIT 1"
+
+- q: 最近 30 天卖得最好的商品
+  sql: "SELECT p.name FROM order_item i JOIN product p ON p.id = i.product_id JOIN orders o ON o.id = i.order_id WHERE o.status <> '已取消' AND o.paid_at >= date('now','-30 days') GROUP BY p.name ORDER BY SUM(i.quantity) DESC LIMIT 1"
+
+- q: 销量最低的 5 个商品
+  sql: "SELECT p.name, SUM(i.quantity) FROM order_item i JOIN product p ON p.id = i.product_id JOIN orders o ON o.id = i.order_id WHERE o.status <> '已取消' GROUP BY p.name ORDER BY 2 ASC LIMIT 5"
+
+- q: 一共多少注册客户
+  sql: "SELECT COUNT(*) FROM customer"
+
+- q: 金卡会员有多少人
+  sql: "SELECT COUNT(*) FROM customer WHERE level = '金卡'"
+
+- q: 各会员等级的客户数
+  sql: "SELECT level, COUNT(*) FROM customer GROUP BY level ORDER BY 2 DESC"
+
+- q: 各城市的客户数
+  sql: "SELECT city, COUNT(*) FROM customer GROUP BY city ORDER BY 2 DESC"
+
+- q: 消费金额最高的 5 个客户
+  sql: "SELECT c.name, ROUND(SUM(o.total_amount - o.discount_amount), 2) AS spend FROM orders o JOIN customer c ON c.id = o.customer_id WHERE o.status <> '已取消' GROUP BY c.name ORDER BY spend DESC LIMIT 5"
+
+- q: 下过单的客户有多少人
+  sql: "SELECT COUNT(DISTINCT customer_id) FROM orders WHERE status <> '已取消'"
+
+- q: 女性客户的订单量
+  sql: "SELECT COUNT(*) FROM orders o JOIN customer c ON c.id = o.customer_id WHERE o.status <> '已取消' AND c.gender = '女'"
+
+- q: 各会员等级的平均客单价
+  sql: "SELECT c.level, ROUND(SUM(o.total_amount - o.discount_amount) / COUNT(DISTINCT o.id), 2) FROM orders o JOIN customer c ON c.id = o.customer_id WHERE o.status <> '已取消' GROUP BY c.level ORDER BY 2 DESC"
+
+- q: 退款总金额是多少
+  sql: "SELECT ROUND(SUM(amount), 2) FROM refund WHERE status = '已退款'"
+
+- q: 退款率是多少
+  sql: "SELECT ROUND(COUNT(DISTINCT r.order_id) * 1.0 / (SELECT COUNT(DISTINCT id) FROM orders WHERE status = '已完成'), 4) FROM refund r WHERE r.status = '已退款'"
+
+- q: 各退款原因的退款笔数
+  sql: "SELECT reason, COUNT(*) FROM refund GROUP BY reason ORDER BY 2 DESC"
+
+- q: 质量问题引起的退款金额
+  sql: "SELECT ROUND(SUM(amount), 2) FROM refund WHERE status = '已退款' AND reason = '质量问题'"
+
+- q: 处理中的退款有几笔
+  sql: "SELECT COUNT(*) FROM refund WHERE status = '处理中'"
+
+- q: 各门店的退款金额
+  sql: "SELECT s.name, ROUND(SUM(r.amount), 2) FROM refund r JOIN orders o ON o.id = r.order_id JOIN store s ON s.id = o.store_id WHERE r.status = '已退款' GROUP BY s.name ORDER BY 2 DESC"
+
+- q: 最近 30 天的退款笔数
+  # 口径和「各退款原因的退款笔数」保持一致：笔数统计全部申请，只有金额才限已退款
+  sql: "SELECT COUNT(*) FROM refund WHERE created_at >= date('now','-30 days')"
+
+- q: 退款金额最高的商品
+  sql: "SELECT p.name FROM refund r JOIN order_item i ON i.id = r.order_item_id JOIN product p ON p.id = i.product_id WHERE r.status = '已退款' GROUP BY p.name ORDER BY SUM(r.amount) DESC LIMIT 1"
+
+- q: 各渠道的订单量
+  sql: "SELECT channel, COUNT(*) FROM orders WHERE status <> '已取消' GROUP BY channel ORDER BY 2 DESC"
+
+- q: 小程序渠道的营收
+  sql: "SELECT ROUND(SUM(total_amount - discount_amount), 2) FROM orders WHERE status <> '已取消' AND channel = '小程序'"
+
+- q: 天猫渠道的客单价
+  sql: "SELECT ROUND(SUM(total_amount - discount_amount) / COUNT(DISTINCT id), 2) FROM orders WHERE status <> '已取消' AND channel = '天猫'"
+
+- q: 门店渠道和线上渠道的订单量对比
+  sql: "SELECT CASE WHEN channel = '门店' THEN '门店' ELSE '线上' END AS c, COUNT(*) FROM orders WHERE status <> '已取消' GROUP BY c ORDER BY 2 DESC"
+
+- q: 最近 12 个月每个月的营收
+  sql: "SELECT strftime('%Y-%m', paid_at) AS m, ROUND(SUM(total_amount - discount_amount), 2) FROM orders WHERE status <> '已取消' AND paid_at >= date('now','-12 months') GROUP BY m ORDER BY m"
+
+- q: 哪个月营收最高
+  sql: "SELECT strftime('%Y-%m', paid_at) FROM orders WHERE status <> '已取消' GROUP BY 1 ORDER BY SUM(total_amount - discount_amount) DESC LIMIT 1"
+
+- q: 最近 7 天每天的订单量
+  sql: "SELECT date(paid_at) AS d, COUNT(*) FROM orders WHERE status <> '已取消' AND paid_at >= date('now','-7 days') GROUP BY d ORDER BY d"
+
+- q: 工作日的订单多还是周末订单多
+  sql: "SELECT CASE WHEN strftime('%w', paid_at) IN ('0','6') THEN '周末' ELSE '工作日' END AS kind, COUNT(*) FROM orders WHERE status <> '已取消' GROUP BY kind ORDER BY 2 DESC"
+
+- q: 各门店的库存总量
+  sql: "SELECT s.name, SUM(v.stock) FROM inventory_snapshot v JOIN store s ON s.id = v.store_id WHERE v.snapshot_date = (SELECT MAX(snapshot_date) FROM inventory_snapshot) GROUP BY s.name"
+
+- q: 库存最少的 5 个商品
+  sql: "SELECT p.name, SUM(v.stock) FROM inventory_snapshot v JOIN product p ON p.id = v.product_id WHERE v.snapshot_date = (SELECT MAX(snapshot_date) FROM inventory_snapshot) GROUP BY p.name ORDER BY 2 ASC LIMIT 5"
+
+- q: 最近一天各门店的销售件数
+  sql: "SELECT s.name, SUM(v.sold) FROM inventory_snapshot v JOIN store s ON s.id = v.store_id WHERE v.snapshot_date = (SELECT MAX(snapshot_date) FROM inventory_snapshot) GROUP BY s.name"
+
+- q: 库存快照覆盖了哪几天
+  sql: "SELECT COUNT(DISTINCT snapshot_date) FROM inventory_snapshot"
+
+- q: 深圳南山店昨天卖出多少件商品
+  sql: "SELECT SUM(v.sold) FROM inventory_snapshot v JOIN store s ON s.id = v.store_id WHERE v.snapshot_date = (SELECT MAX(snapshot_date) FROM inventory_snapshot) AND s.name = '深圳南山店'"
+
+- q: 昨天全部门店的总销量
+  sql: "SELECT SUM(v.sold) FROM inventory_snapshot v WHERE v.snapshot_date = (SELECT MAX(snapshot_date) FROM inventory_snapshot)"
