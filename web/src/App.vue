@@ -20,6 +20,7 @@ const question = ref('')
 const loading = ref(false)
 const error = ref('')
 const clarify = ref('')
+const clarifyOptions = ref([])
 const sessionId = ref('')
 const turns = ref(0)
 const result = ref(null)
@@ -39,6 +40,7 @@ async function ask() {
   loading.value = true
   error.value = ''
   clarify.value = ''
+  clarifyOptions.value = []
   result.value = null
   disposeChart()
 
@@ -53,6 +55,7 @@ async function ask() {
     sessionId.value = data.session_id || sessionId.value
     if (data.need_clarify) {
       clarify.value = data.clarify
+      clarifyOptions.value = data.clarify_options || []
       return
     }
     result.value = data
@@ -74,6 +77,7 @@ async function newSession() {
   turns.value = 0
   result.value = null
   clarify.value = ''
+  clarifyOptions.value = []
   error.value = ''
   disposeChart()
 }
@@ -167,7 +171,14 @@ onBeforeUnmount(disposeChart)
     </div>
 
     <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="clarify" class="clarify">{{ clarify }}</p>
+    <div v-if="clarify" class="clarify">
+      <p>{{ clarify }}</p>
+      <div v-if="clarifyOptions.length" class="examples">
+        <button v-for="o in clarifyOptions" :key="o.question" class="chip" @click="useExample(o.question)">
+          {{ o.label }}
+        </button>
+      </div>
+    </div>
 
     <section v-if="result" class="result">
       <div class="head">

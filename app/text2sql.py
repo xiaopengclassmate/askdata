@@ -105,6 +105,9 @@ def _build_user_prompt(question: str, tables: list[str], error_hint: str = "",
         parts.append(
             "## 上文（同一会话里刚才问过的，只用来理解「那上个月呢」这类追问；"
             "和本次问题冲突时以本次为准）\n" + history
+            + "\n追问规则：本次问题里省略的条件（时间范围、指标、维度）从上文继承；"
+              "只替换本次明确说出来的部分（比如「换成华南区」只改筛选条件，"
+              "时间和指标沿用上一条 SQL）。"
         )
     parts.append(f"## 问题\n{question}")
     if error_hint:
@@ -117,12 +120,14 @@ def answer(question: str, history: str = "") -> dict:
     started = time.monotonic()
 
     # 问题本身没说清时不猜，先反问（确定性规则，不消耗模型调用）
-    hint = clarify.need_clarify(question)
+    hint = clarify.need_clarify(question, has_history=bool(history.strip()))
     if hint:
         return {
             "ok": False,
             "need_clarify": True,
-            "clarify": hint,
+            "clarify_kind": hint.kind,
+            "clarify": hint.message,
+            "clarify_options": hint.options,
             "question": question,
             "elapsed_ms": int((time.monotonic() - started) * 1000),
         }

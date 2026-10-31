@@ -109,6 +109,9 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   font-size: 14px;
 }
 
+.clarify p { margin: 0; }
+.clarify .examples { margin: 12px 0 0; color: #b9cdff; }
+
 .error {
   margin-top: 18px;
   padding: 12px 14px;
