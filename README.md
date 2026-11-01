@@ -29,7 +29,7 @@
                  │  ③ 生成 SQL（DashScope / qwen-plus）         │
                  │  ④ 四道关卡                                  │
                  │     安全网关 → 语义层 → EXPLAIN → 只读执行    │
-                 │  ⑤ 报错回喂模型，重试 ≤3 次                   │
+                 │  ⑤ 报错 / 结果为空 → 回喂模型重写，重试 ≤3 次  │
                  └───────────────┬──────────────────────────────┘
                                  ▼
                    结果 + SQL + 重试日志 + 建议图型
@@ -53,9 +53,12 @@
 - [x] 含糊问题反问：既没指标也没维度时先问清楚，不硬猜
 - [x] FastAPI 接口：`/health` `/api/schema` `/api/query` `/api/ask` `/api/session/{id}`
 - [x] Vue 3 + ECharts 前端（按需引入，构建产物 575 kB），构建后由 FastAPI 直接托管
-- [x] 单测 49 条（安全网关 / 语义层 / 会话 / 反问 / 链路）
+- [x] 结果自检：SQL 合法但跑出空结果（0 行 / 聚合 NULL）时回喂模型重写
+- [x] 单测 71 条（安全网关 / 语义层 / 会话 / 反问 / 链路 / 限流 / 结果自检）
 - [x] 60 条开发集 + 结果集比对脚本 `eval/run_eval.py`（full / baseline 消融）
 - [x] 20 条留出集 `eval/questions-holdout.yml`（写完冻结，用来验证不是调出来的）
+- [x] 公网保护：每 IP 限流 + 全局日配额 + 并发闸门（`app/ratelimit.py`）
+- [x] 结构化日志：访问日志 + 每问一条（问题 / SQL / 重试 / 耗时 / IP）
 - [x] Docker 多阶段构建 + GitHub Actions（push 时跑单测）
 
 冒烟结果：合法 join 查询 6 行 0ms；`DROP TABLE`、`SELECT 1; DELETE ...`、`UPDATE` 全部 400 拦截。
@@ -78,6 +81,9 @@ askdata/
 │   ├── semantic.py          # 语义层加载 + join 白名单校验
 │   ├── clarify.py           # 含糊问题反问（纯规则）
 │   ├── session.py           # 多轮会话上下文（内存 + TTL）
+│   ├── sanity.py            # 结果自检（SQL 合法但返回空 → 判可疑，回喂重写）
+│   ├── ratelimit.py         # 公网保护：每 IP 限流 / 日配额 / 并发闸门
+│   ├── logging_setup.py     # 结构化日志（一行一条 key=value）
 │   ├── llm.py               # DashScope 兼容接口 + JSON 容错解析
 │   ├── text2sql.py          # 选表 → 生成 → 校验 → 执行 → 自修复 → 选图
 │   └── main.py              # FastAPI 入口（顺带托管前端构建产物）
@@ -90,7 +96,7 @@ askdata/
 │   ├── questions.yml        # 60 条开发集 + 标准 SQL
 │   ├── questions-holdout.yml# 20 条留出集（冻结，验证泛化）
 │   └── run_eval.py          # 结果集比对，full / baseline 两种模式
-├── tests/                   # 49 条单测
+├── tests/                   # 71 条单测
 ├── web/                     # Vue 3 + ECharts 前端
 ├── .github/workflows/ci.yml # push 时跑单测
 ├── Dockerfile               # node 构建前端 → python 运行时，单镜像
@@ -134,6 +140,35 @@ docker compose -f docker-compose.prod.yml up -d --build
 
 两个坑：① 台机器内存紧张，**构建/首次启动那几秒 sshd 会失去响应**（banner exchange 超时），等一两分钟自己恢复，别急着重启；② 容器不挂 volume，重建就重灌演示库——演示数据带相对日期，留旧库会让「最近 7 天」查不到东西。
 
+## 公网保护与可观测性
+
+把带 API key 的服务直接挂到公网，等于把额度送给扫端口的人。所以 `/api/ask` 前有三层，各自挡一种打法（`app/ratelimit.py`）：
+
+| 层 | 挡什么 | 默认 |
+|---|---|---|
+| 单 IP 每分钟 | 同一个 IP 的脚本猛刷 | ask 10 次/分、query 30 次/分 |
+| 全局每日 ask 次数 | 换着 IP 刷——额度用完就停，最坏损失有上界 | 200 次/天（约 600 次模型调用） |
+| 同时处理的 ask 数 | 并发打满：单次 2~3 秒，1.7G 的机器扛不住几十个并发 | 4 个 |
+
+几个刻意的选择：
+
+- **超限返回 429 + `Retry-After`**，不是排队。排队只会把请求堆在内存里，越堆越多，最后一起超时。
+- **默认不信 `X-Forwarded-For`**：这个头谁都能伪造，信了就等于给限流开后门。前面真挂了 Nginx 再用 `TRUST_PROXY_HEADERS=true` 打开。
+- **状态放进程内**：线上是单容器单进程（uvicorn 默认 1 worker），多 worker / 多实例时这套要挪到 Redis（`INCR + EXPIRE` 或 ZSET 滑动窗口）。知道边界在哪，比现在就多部署一个组件重要。
+- `GET /health` 会带上 `daily_quota_left`，看一眼就知道今天是不是被人刷过。
+
+日志一行一条，`docker logs askdata` 直接读（时间是 UTC，带 `Z` 后缀——容器默认 UTC，本地开发是北京时间，不标出来最容易看错）：
+
+```
+2026-11-01T07:58:37Z INFO  http status=200 method=POST path=/api/ask ip=1.2.3.4 elapsed_ms=2083
+2026-11-01T07:58:37Z INFO  ask ok=True quota_used=3/200 session=4d8c6fcca242 ip=1.2.3.4
+                           attempts=1 rows=1 elapsed_ms=2077 query_ms=30
+                           q="库存总量是多少" sql="SELECT SUM(stock) ... WHERE snapshot_date = (SELECT MAX(...))"
+2026-11-01T07:58:37Z WARNING ask limited=daily_quota ip=1.2.3.4 reason=今日演示额度（200 次）已用完，明天再来
+```
+
+带 question 和 SQL 的原因很实际：线上答错了，光看状态码 `200` 没有任何信息量；有这两样，不登服务器也能复现。
+
 ## 业务口径（写在这里，也写进了 schema 目录）
 
 这几条是模型最容易错、面试官最爱问的地方：
@@ -169,8 +204,9 @@ docker compose -f docker-compose.prod.yml up -d --build
 1. **schema 不进数据库注释，单独一份 Python 目录**：SQLite 丢注释，且模型要的是业务口径不是类型。
 2. **沙箱是双保险**：语法白名单 + 只读连接。即使模型被注入，最坏也只能读到该看的数据。
 3. **强制 LIMIT**：防止 `SELECT *` 把大表打回内存，也防止前端被百万行拖死。
-4. **错误自修复**：执行报错时把数据库原文回喂模型重试（≤2 次），比调 prompt 更有效。
+4. **错误自修复**：执行报错时把数据库原文回喂模型重试（最多 3 次尝试），比调 prompt 更有效。
 5. **列形状单独成段、贴在问题后面**：问「哪个最」该出几列几行、问「前 5」该不该带指标列，这套规则放系统提示里模型经常不听话，贴近问题的位置才稳定（见下方评测里的 `SHAPE_HINT`）。
+6. **结果自检**：报错自修复只管「跑不起来」，但更常见的错法是 SQL 合法、跑出来是空的——聚合被 WHERE 全过滤掉返回 `NULL`，或者筛选值写成了库里不存在的叫法（模型很爱把「线上」扩写成「线上渠道」）。这两种没有任何异常可回喂，所以加一道按**结果**判的检查：0 行 / 单值 `NULL` 就判可疑，把原因当错误提回去让它重写。刻意判得很窄——`0`、负数、并列、超预期的大数一律不管，那些要么合法，要么得靠业务知识才判得了，硬判必然误伤正确答案。
 
 ## 评测结果（2026-11-01 定稿）
 
@@ -179,7 +215,9 @@ docker compose -f docker-compose.prod.yml up -d --build
 | 模式 | 通过 | 准确率 | 平均耗时 |
 |---|---|---|---|
 | baseline：裸 schema，无语义层、无校验、不重试 | 47/60 | 78.3% | 2.34s |
-| full：语义层 + 三重校验 + 报错自修复（最多 3 次尝试） | 60/60 | **100%** | 2.68s |
+| full：语义层 + 三重校验 + 自修复 + 结果自检（最多 3 次尝试） | 60/60 | **100%** | 2.98s |
+
+> 加结果自检之后重跑过一遍：开发集仍然 60/60、留出集仍然 19/20，没有回退。平均耗时从 2.68s 涨到 2.98s——一次 `ask` 最多 2~3 次模型调用，这个量级里分不清是自检多了一轮重写还是模型侧抖动，不做过度解读。
 
 > **口径说明**：这 60 条题在开发过程中被用来定位问题、调 prompt 规则，所以 full 的 100% 是「在这套题上」的成绩，不代表任意新问题的准确率。更要看的是 baseline——同一套题、同一个模型、同一份 schema 检索，唯一变量是语义层 + 三重校验 + 自修复，78.3% → 100% 才是这套设计带来的增量。
 

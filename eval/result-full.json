@@ -3,7 +3,7 @@
   "total": 60,
   "passed": 60,
   "accuracy": 1.0,
-  "elapsed_seconds": 161.0,
-  "avg_seconds_per_question": 2.68,
+  "elapsed_seconds": 179.0,
+  "avg_seconds_per_question": 2.98,
   "failed": []
 }

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import time
 
-from . import clarify, db, llm, semantic, sql_guard
+from . import clarify, db, llm, sanity, semantic, sql_guard
 from .config import settings
 from .schema_catalog import TABLE_DOCS, render_schema
 
@@ -201,6 +201,17 @@ def answer(question: str, history: str = "") -> dict:
             hints.append(f"第 {attempt} 次 · {last_error}")
             continue
 
+        # 第五关（在模型之外）：结果自检。SQL 合法但跑出空结果，多半是条件写错了，
+        # 这时候没有任何异常可以回喂，只能把「结果是空」这件事本身当成错误提回去。
+        # 还有次数就让模型带着这条线索重写；已经是最后一次就照常返回、带上 warning——
+        # 返回 ok=False 更糟，用户会什么都看不到。
+        suspicious = sanity.check_result(result.columns, result.rows, guard.sql)
+        if suspicious:
+            hints.append(f"第 {attempt} 次 · 结果自检：{suspicious}")
+            if attempt < MAX_ATTEMPTS:
+                last_error = suspicious
+                continue
+
         return {
             "ok": True,
             "question": question,
@@ -214,6 +225,8 @@ def answer(question: str, history: str = "") -> dict:
             "tables_used": tables,
             "attempts": attempt,
             "retry_log": hints,
+            # 最后一次才判可疑时会走到这里：结果照给，但明说它可疑
+            "warning": suspicious,
             "elapsed_ms": int((time.monotonic() - started) * 1000),
             "query_ms": result.elapsed_ms,
         }

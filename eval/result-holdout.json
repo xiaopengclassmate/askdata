@@ -3,8 +3,8 @@
   "total": 20,
   "passed": 19,
   "accuracy": 0.95,
-  "elapsed_seconds": 53.9,
-  "avg_seconds_per_question": 2.7,
+  "elapsed_seconds": 63.4,
+  "avg_seconds_per_question": 3.17,
   "failed": [
     {
       "q": "停售商品占全部商品的比例是多少",

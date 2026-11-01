@@ -15,6 +15,14 @@ services:
       DASHSCOPE_MODEL: ${DASHSCOPE_MODEL:-qwen-plus}
       QUERY_MAX_ROWS: "200"
       QUERY_TIMEOUT_SECONDS: "5"
+      # 公网保护：ask 真花 API 额度，这三层缺一不可（详见 app/ratelimit.py）
+      ASK_RATE_PER_MIN: ${ASK_RATE_PER_MIN:-10}
+      QUERY_RATE_PER_MIN: ${QUERY_RATE_PER_MIN:-30}
+      DAILY_ASK_QUOTA: ${DAILY_ASK_QUOTA:-200}
+      MAX_CONCURRENT_ASK: ${MAX_CONCURRENT_ASK:-4}
+      # 直连 8130，没有反向代理；设成 true 就等于允许伪造 X-Forwarded-For 绕过限流
+      TRUST_PROXY_HEADERS: "false"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     mem_limit: 400m
     restart: unless-stopped
 
