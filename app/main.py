@@ -110,6 +110,10 @@ def schema() -> dict:
 
 @app.post("/api/query")
 def run_query(payload: QueryIn, request: Request) -> dict:
+    # 线上不需要这个口子：它不产生业务价值，却把「随便跑一条 SQL」的能力暴露给公网
+    if not settings.enable_raw_sql:
+        raise HTTPException(404, "Not Found")
+
     try:
         ratelimit.limiter.hit(
             ratelimit.client_ip(request), "query", settings.query_rate_per_min

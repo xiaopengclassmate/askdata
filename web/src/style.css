@@ -218,3 +218,25 @@ tbody tr:hover { background: rgba(79, 140, 255, .06); }
   color: var(--muted);
   font-size: 12px;
 }
+
+.result .actions {
+  display: flex;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.result .actions .link:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* 结果自检判可疑时提示：结果是给了，但别当成准的用 */
+.warn {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 189, 89, .1);
+  border: 1px solid rgba(255, 189, 89, .35);
+  color: #ffce7a;
+  font-size: 13px;
+}

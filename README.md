@@ -52,9 +52,11 @@
 - [x] 多轮会话：`session_id` 带上最近 2 轮上文（追问"那上个月呢"不用重复说）
 - [x] 含糊问题反问：既没指标也没维度时先问清楚，不硬猜
 - [x] FastAPI 接口：`/health` `/api/schema` `/api/query` `/api/ask` `/api/session/{id}`
-- [x] Vue 3 + ECharts 前端（按需引入，构建产物 575 kB），构建后由 FastAPI 直接托管
+- [x] Vue 3 + ECharts 前端（按需引入，构建产物 577 kB），构建后由 FastAPI 直接托管
 - [x] 结果自检：SQL 合法但跑出空结果（0 行 / 聚合 NULL）时回喂模型重写
-- [x] 单测 71 条（安全网关 / 语义层 / 会话 / 反问 / 链路 / 限流 / 结果自检）
+- [x] 前端可「复制 SQL / 导出 CSV」（CSV 带 BOM，Excel 打开中文不乱码）
+- [x] 裸 SQL 口 `/api/query` 生产默认关闭（`ENABLE_RAW_SQL=false` 后一律 404）
+- [x] 单测 79 条（安全网关 / 语义层 / 会话 / 反问 / 链路 / 限流 / 结果自检 / 接口层）
 - [x] 60 条开发集 + 结果集比对脚本 `eval/run_eval.py`（full / baseline 消融）
 - [x] 20 条留出集 `eval/questions-holdout.yml`（写完冻结，用来验证不是调出来的）
 - [x] 公网保护：每 IP 限流 + 全局日配额 + 并发闸门（`app/ratelimit.py`）
@@ -96,7 +98,7 @@ askdata/
 │   ├── questions.yml        # 60 条开发集 + 标准 SQL
 │   ├── questions-holdout.yml# 20 条留出集（冻结，验证泛化）
 │   └── run_eval.py          # 结果集比对，full / baseline 两种模式
-├── tests/                   # 71 条单测
+├── tests/                   # 79 条单测
 ├── web/                     # Vue 3 + ECharts 前端
 ├── .github/workflows/ci.yml # push 时跑单测
 ├── Dockerfile               # node 构建前端 → python 运行时，单镜像
@@ -156,6 +158,7 @@ docker compose -f docker-compose.prod.yml up -d --build
 - **默认不信 `X-Forwarded-For`**：这个头谁都能伪造，信了就等于给限流开后门。前面真挂了 Nginx 再用 `TRUST_PROXY_HEADERS=true` 打开。
 - **状态放进程内**：线上是单容器单进程（uvicorn 默认 1 worker），多 worker / 多实例时这套要挪到 Redis（`INCR + EXPIRE` 或 ZSET 滑动窗口）。知道边界在哪，比现在就多部署一个组件重要。
 - `GET /health` 会带上 `daily_quota_left`，看一眼就知道今天是不是被人刷过。
+- **裸 SQL 口 `/api/query` 线上关掉**（`ENABLE_RAW_SQL=false`，返回 404 而不是 403——不告诉对方「这里有东西只是被禁了」）。它只服务本地调试和压测沙箱，对公网没有任何业务价值。
 
 日志一行一条，`docker logs askdata` 直接读（时间是 UTC，带 `Z` 后缀——容器默认 UTC，本地开发是北京时间，不标出来最容易看错）：
 
@@ -257,4 +260,4 @@ baseline 的 13 条失败里，典型错法是：营收漏排除取消单返回 
 > · 建语义层把 7 个指标口径（公式 + 强制过滤条件）从代码抽成配置，模型只能从已定义口径里挑；配三重校验（安全网关 / 语义 join 白名单 / EXPLAIN 预编译）与报错回喂自修复（≤3 次），自建 60 题结果集比对，同一批题消融 78.3% → 100%
 > · 执行安全不依赖模型听话：只读连接 `mode=ro` + 单条 SELECT 白名单 + 强制 LIMIT + `set_progress_handler` 超时中断，DDL/DML、多语句拼接全部拦截
 > · 多轮追问与含糊反问：带最近 2 轮问题 + SQL 做条件继承，模型只替换说出来的部分；问题缺指标 / 缺上文 / 口径歧义时反问并给可点选项，不让模型决定"要不要问"
-> · 检索式 schema 裁剪 + 规则选图（不额外调模型），前端按需引入 ECharts 把包体从 1.1 MB 压到 575 kB，构建产物由 FastAPI 直接托管，单镜像部署
+> · 检索式 schema 裁剪 + 规则选图（不额外调模型），前端按需引入 ECharts 把包体从 1.1 MB 压到 577 kB，构建产物由 FastAPI 直接托管，单镜像部署

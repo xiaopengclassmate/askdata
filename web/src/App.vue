@@ -25,8 +25,10 @@ const sessionId = ref('')
 const turns = ref(0)
 const result = ref(null)
 const showSql = ref(false)
+const copied = ref(false)
 const chartEl = ref(null)
 let chart = null
+let copyTimer = null
 
 const canAsk = computed(() => question.value.trim().length > 0 && !loading.value)
 
@@ -140,7 +142,53 @@ function fmt(v) {
   return v ?? ''
 }
 
-onBeforeUnmount(disposeChart)
+async function copySql() {
+  const sql = result.value?.sql
+  if (!sql) return
+  try {
+    await navigator.clipboard.writeText(sql)
+  } catch {
+    // 非 https（比如直接 IP 访问）浏览器不给 clipboard 权限，退回 textarea 复制
+    const ta = document.createElement('textarea')
+    ta.value = sql
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+  }
+  copied.value = true
+  clearTimeout(copyTimer)
+  copyTimer = setTimeout(() => (copied.value = false), 1500)
+}
+
+function exportCsv() {
+  const r = result.value
+  if (!r || !r.rows.length) return
+  // 逗号、引号、换行都要转义，否则 Excel 一打开就串列
+  const cell = (v) => {
+    const s = v === null || v === undefined ? '' : String(v)
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  const lines = [
+    r.columns.join(','),
+    ...r.rows.map((row) => r.columns.map((c) => cell(row[c])).join(','))
+  ]
+  // 前置 BOM：不加的话 Excel 双击打开中文全乱码
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `askdata-${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}.csv`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+onBeforeUnmount(() => {
+  disposeChart()
+  clearTimeout(copyTimer)
+})
 </script>
 
 <template>
@@ -183,10 +231,16 @@ onBeforeUnmount(disposeChart)
     <section v-if="result" class="result">
       <div class="head">
         <h2>{{ result.explanation || '查询结果' }}</h2>
-        <button class="link" @click="showSql = !showSql">
-          {{ showSql ? '收起 SQL' : '查看 SQL' }}
-        </button>
+        <div class="actions">
+          <button class="link" @click="showSql = !showSql">
+            {{ showSql ? '收起 SQL' : '查看 SQL' }}
+          </button>
+          <button class="link" @click="copySql">{{ copied ? '已复制' : '复制 SQL' }}</button>
+          <button class="link" :disabled="!result.rows.length" @click="exportCsv">导出 CSV</button>
+        </div>
       </div>
+
+      <p v-if="result.warning" class="warn">结果可能有问题：{{ result.warning }}</p>
 
       <pre v-if="showSql" class="sql">{{ result.sql }}</pre>
 

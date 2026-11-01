@@ -15,6 +15,8 @@ services:
       DASHSCOPE_MODEL: ${DASHSCOPE_MODEL:-qwen-plus}
       QUERY_MAX_ROWS: "200"
       QUERY_TIMEOUT_SECONDS: "5"
+      # 裸 SQL 口子只在本地调试用，线上关掉
+      ENABLE_RAW_SQL: "false"
       # 公网保护：ask 真花 API 额度，这三层缺一不可（详见 app/ratelimit.py）
       ASK_RATE_PER_MIN: ${ASK_RATE_PER_MIN:-10}
       QUERY_RATE_PER_MIN: ${QUERY_RATE_PER_MIN:-30}

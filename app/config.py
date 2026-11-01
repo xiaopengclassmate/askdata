@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     query_max_rows: int = 200
     query_timeout_seconds: float = 5.0
 
+    # 裸 SQL 执行口（/api/query）是调试和压测沙箱用的，线上不需要对外开着。
+    # 关掉后路由还在但一律 404，不透露「这里有东西只是被禁了」。
+    enable_raw_sql: bool = True
+
     # ---- 公网保护（0 表示关闭该项）----
     # 单 IP 每分钟：/api/ask 会真实调模型，卡得紧一点；/api/query 只执行本地 SQL。
     ask_rate_per_min: int = 10
