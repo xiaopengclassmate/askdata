@@ -21,7 +21,7 @@ from decimal import Decimal
 
 from ..config import settings
 from ..permissions import Scope, scoped_views
-from .base import QueryResult, QueryTimeout
+from .base import QueryResult, QueryTimeout, unique_columns
 
 SCHEMA_PREFIX = "public."
 
@@ -78,7 +78,9 @@ class PostgresBackend:
             with conn.cursor() as cur:
                 cur.execute(sql)
                 rows = cur.fetchmany(settings.query_max_rows + 1)
-                columns = [d.name for d in cur.description] if cur.description else []
+                columns = unique_columns(
+                    [d.name for d in cur.description] if cur.description else []
+                )
         except psycopg.errors.QueryCanceled as exc:
             raise QueryTimeout(f"查询超过 {timeout} 秒已中断") from exc
         finally:

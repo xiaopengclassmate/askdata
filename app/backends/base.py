@@ -14,6 +14,25 @@ from typing import Any, Protocol
 from ..permissions import Scope
 
 
+def unique_columns(columns: list[str]) -> list[str]:
+    """给重名列加序号：`SELECT s.name, c.name` 两列都会叫 name。
+
+    结果行是 dict，键重了就会**静默丢掉一列**——接口返回给前端少一列，
+    评测里两个引擎的比对也会拿错值。这里统一改成 name / name_2，
+    和引擎无关（两个后端都走这一份），所以比对仍然一一对应。
+    """
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    for col in columns:
+        if col in seen:
+            seen[col] += 1
+            out.append(f"{col}_{seen[col] + 1}")  # 第二次出现叫 name_2，不是 name_1
+        else:
+            seen[col] = 0
+            out.append(col)
+    return out
+
+
 @dataclass
 class QueryResult:
     columns: list[str]

@@ -7,7 +7,7 @@ import time
 
 from ..config import DB_PATH, settings
 from ..permissions import Scope, scoped_views
-from .base import QueryResult, QueryTimeout
+from .base import QueryResult, QueryTimeout, unique_columns
 
 SCHEMA_PREFIX = "main."
 
@@ -47,8 +47,15 @@ class SQLiteBackend:
         started = time.monotonic()
         try:
             cur = conn.execute(sql)
-            rows = [dict(r) for r in cur.fetchmany(settings.query_max_rows + 1)]
-            columns = [d[0] for d in cur.description] if cur.description else []
+            raw = cur.fetchmany(settings.query_max_rows + 1)
+            columns = unique_columns(
+                [d[0] for d in cur.description] if cur.description else []
+            )
+            # 自己按列位置组装 dict：sqlite3.Row 遇到重名列会覆盖，
+            # 与其让结果静默少一列，不如先给重名列编号
+            rows = [
+                {col: value for col, value in zip(columns, tuple(r))} for r in raw
+            ]
         except sqlite3.OperationalError as exc:
             if "interrupted" in str(exc).lower():
                 raise QueryTimeout(f"查询超过 {timeout} 秒已中断") from exc

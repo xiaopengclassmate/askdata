@@ -80,7 +80,14 @@ def test_all_eval_sql_matches_between_engines(backends):
             mismatched.append(f"{label}: 列数不同 {a.columns} vs {b.columns}")
             continue
         if _norm(a.rows, a.columns) != _norm(b.rows, b.columns):
-            mismatched.append(f"{label}: 结果不同（SQLite {len(a.rows)} 行 / PG {len(b.rows)} 行）")
+            na, nb = _norm(a.rows, a.columns), _norm(b.rows, b.columns)
+            first = next(
+                (f"SQLite {x} / PG {y}" for x, y in zip(na, nb) if x != y), "行数或列数不同"
+            )
+            mismatched.append(
+                f"{label}: 结果不同（SQLite {len(a.rows)} 行 / PG {len(b.rows)} 行），"
+                f"首个差异 {first}"
+            )
 
     # CI 里跑挂时，每条差异都变成一条 annotation，不用登进去翻日志才知道差在哪几题
     for m in mismatched[:10]:

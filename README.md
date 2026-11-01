@@ -62,7 +62,7 @@
 - [x] 结果自检：SQL 合法但跑出空结果（0 行 / 聚合 NULL）时回喂模型重写
 - [x] 前端可「复制 SQL / 导出 CSV」（CSV 带 BOM，Excel 打开中文不乱码）
 - [x] 裸 SQL 口 `/api/query` 生产默认关闭（`ENABLE_RAW_SQL=false` 后一律 404）
-- [x] 单测 103 条（其中 2 条双引擎比对用例在没接 PostgreSQL 时自动跳过）
+- [x] 单测 105 条（其中 2 条双引擎比对用例在没接 PostgreSQL 时自动跳过）
 - [x] 评测集 200 条：开发集 140 条 + 留出集 60 条，每题带题型标签，跑完按题型 / 按批次归因
 - [x] 标准答案自检 `eval/check_questions.py`：不调模型，先证明「题目本身没写错」
 - [x] 公网保护：每 IP 限流 + 全局日配额 + 并发闸门（`app/ratelimit.py`）
@@ -107,7 +107,7 @@ askdata/
 │   ├── questions-holdout.yml# 60 条留出集（冻结，验证泛化）
 │   ├── check_questions.py   # 标准答案自检（不调模型）
 │   └── run_eval.py          # 结果集比对，按题型 / 按批次归因
-├── tests/                   # 103 条单测（含评测集完整性校验）
+├── tests/                   # 105 条单测（含评测集完整性校验）
 ├── web/                     # Vue 3 + ECharts 前端
 ├── .github/workflows/ci.yml # push 时跑单测
 ├── Dockerfile               # node 构建前端 → python 运行时，单镜像
