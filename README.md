@@ -50,8 +50,9 @@
 - [x] 含糊问题反问：既没指标也没维度时先问清楚，不硬猜
 - [x] FastAPI 接口：`/health` `/api/schema` `/api/query` `/api/ask` `/api/session/{id}`
 - [x] Vue 3 + ECharts 前端（按需引入，构建产物 575 kB），构建后由 FastAPI 直接托管
-- [x] 单测 45 条（安全网关 / 语义层 / 会话 / 反问 / 链路）
-- [x] 60 条评测集 + 结果集比对脚本 `eval/run_eval.py`（full / baseline 消融）
+- [x] 单测 49 条（安全网关 / 语义层 / 会话 / 反问 / 链路）
+- [x] 60 条开发集 + 结果集比对脚本 `eval/run_eval.py`（full / baseline 消融）
+- [x] 20 条留出集 `eval/questions-holdout.yml`（写完冻结，用来验证不是调出来的）
 - [x] Docker 多阶段构建 + GitHub Actions（push 时跑单测）
 
 冒烟结果：合法 join 查询 6 行 0ms；`DROP TABLE`、`SELECT 1; DELETE ...`、`UPDATE` 全部 400 拦截。
@@ -83,12 +84,15 @@ askdata/
 │   ├── schema.sql           # 8 张表
 │   └── seed.py              # 造数（固定种子）
 ├── eval/
-│   ├── questions.yml        # 60 条问题 + 标准 SQL
+│   ├── questions.yml        # 60 条开发集 + 标准 SQL
+│   ├── questions-holdout.yml# 20 条留出集（冻结，验证泛化）
 │   └── run_eval.py          # 结果集比对，full / baseline 两种模式
-├── tests/                   # 45 条单测
+├── tests/                   # 49 条单测
 ├── web/                     # Vue 3 + ECharts 前端
 ├── .github/workflows/ci.yml # push 时跑单测
 ├── Dockerfile               # node 构建前端 → python 运行时，单镜像
+├── Dockerfile.prebuilt      # 小内存服务器用：dist 本地构建好，镜像里不装 node
+├── docker-compose.prod.yml  # 线上部署（限内存 + 宿主机 .env 提供密钥）
 └── requirements.txt
 ```
 
@@ -172,6 +176,16 @@ docker compose up -d --build
 - 追问只是换筛选条件（「那华南区呢」「只看 X」）→ 这不是在问「哪个」，列和分组沿用上一轮
 
 代价是改规则会互相打架：加「只返回对象一列」之后，「前 5」和对比题立刻丢列，来回调了三轮才收敛——这也是每次改完都重跑 full + baseline 的原因。
+
+**留出集**（`eval/questions-holdout.yml`，20 条，写完后冻结、没有参与过任何提示词调整）：
+
+| 通过 | 准确率 | 说明 |
+|---|---|---|
+| 19/20 | **95.0%** | 唯一失败：「停售商品占全部商品的比例」模型答 6.67（百分数），标准答案是 0.0667（比率）——单位口径分歧，不是算错 |
+
+这套题就是为了回答「100% 是不是调出来的」：同一份提示词、不改一个字直接跑，能到 95%。差的 5 个点集中在**问法本身有歧义**（比例还是百分比）和**同数并列**（哪个品类商品最多）这类地方，和模型算错关系不大。
+
+> 诚实记录：留出集**第一次跑是 17/20**，其中 2 条是题出得有问题——「哪个品类的商品最多」5 个品类各 6 个商品、并列没有唯一答案；「退款笔数最多的商品」按项目自己的口径（退款笔数是申请笔数，不按 status 过滤）前两名都是 26 笔，同样并列。这两条换成了有唯一答案的问法后整套重跑，才得到 19/20。换过题这件事写在这里，不藏着；但不是因为模型答错才换的。
 
 **多轮追问**（`eval/multiturn.yml`，6 组两轮对话，只看最后一轮）：
 

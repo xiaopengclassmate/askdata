@@ -1,0 +1,29 @@
+# 小内存服务器部署用：前端在本地 `npm run build` 好再随包送上来，镜像里不做 node 构建。
+#
+# 和根目录 Dockerfile 的区别只有一个：少了 node 阶段。目标机只有 1.7G 内存、
+# 还跑着别的服务，`npm ci` 在容器里会 OOM，所以把构建挪到本地。
+#
+# 用法见 docker-compose.prod.yml。
+
+FROM python:3.12-slim
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+COPY app/ ./app/
+COPY db/ ./db/
+COPY semantic_layer/ ./semantic_layer/
+COPY web/dist/ ./web/dist/
+
+ENV QUERY_MAX_ROWS=200 \
+    QUERY_TIMEOUT_SECONDS=5
+
+EXPOSE 8130
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s \
+  CMD python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8130/health',timeout=2)"
+
+# 演示库里的时间都是相对运行日的（「最近 7 天」「上个月」），所以容器每次重建都重新
+# 灌一份，而不是把库烤进镜像——否则跑两周后「最近 30 天」就没有数据了。
+CMD ["sh", "-c", "python db/seed.py && exec python -m uvicorn app.main:app --host 0.0.0.0 --port 8130"]

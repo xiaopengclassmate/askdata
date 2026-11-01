@@ -1,0 +1,15 @@
+{
+  "mode": "full",
+  "total": 20,
+  "passed": 19,
+  "accuracy": 0.95,
+  "elapsed_seconds": 53.9,
+  "avg_seconds_per_question": 2.7,
+  "failed": [
+    {
+      "q": "停售商品占全部商品的比例是多少",
+      "detail": "结果不符：期望 [(0.07,)] 实得 [(6.67,)]",
+      "sql": "SELECT ROUND(COUNT(CASE WHEN status = '停售' THEN 1 END) * 100.0 / COUNT(*), 2) AS ratio FROM product LIMIT 200"
+    }
+  ]
+}

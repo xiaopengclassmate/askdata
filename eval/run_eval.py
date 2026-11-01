@@ -49,9 +49,13 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["full", "baseline"], default="full")
     ap.add_argument("--limit", type=int, default=0)
+    # 留出集用 --questions questions-holdout.yml --out result-holdout.json，
+    # 别覆盖开发集的 result-full.json，两组数字要能分开讲。
+    ap.add_argument("--questions", default="questions.yml")
+    ap.add_argument("--out", default="")
     args = ap.parse_args()
 
-    questions = yaml.safe_load((BASE / "questions.yml").read_text(encoding="utf-8"))
+    questions = yaml.safe_load((BASE / args.questions).read_text(encoding="utf-8"))
     if args.limit:
         questions = questions[: args.limit]
 
@@ -102,7 +106,7 @@ def main() -> None:
         "failed": failed,
     }
 
-    out = BASE / f"result-{args.mode}.json"
+    out = BASE / (args.out or f"result-{args.mode}.json")
     out.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print("\n" + "=" * 60)

@@ -1,0 +1,22 @@
+# 线上部署（8.134.184.59）。和根目录 docker-compose.yml 的区别：
+#   · 用 Dockerfile.prebuilt（前端 dist 已经本地构建好，容器里不装 node）
+#   · 限内存：目标机 1.7G，已经跑着面试陪练 + mysql + rabbitmq
+#   · 用宿主机 .env 提供 DASHSCOPE_API_KEY（600 权限，不进仓库）
+services:
+  askdata:
+    build:
+      context: .
+      dockerfile: Dockerfile.prebuilt
+    container_name: askdata
+    ports:
+      - "8130:8130"
+    environment:
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?DASHSCOPE_API_KEY 未设置}
+      DASHSCOPE_MODEL: ${DASHSCOPE_MODEL:-qwen-plus}
+      QUERY_MAX_ROWS: "200"
+      QUERY_TIMEOUT_SECONDS: "5"
+    mem_limit: 400m
+    restart: unless-stopped
+
+# 备注：容器里没有挂 volume，重建即重新灌演示库——演示数据带相对日期，
+# 留一份旧库反而会让「最近 7 天」查不到东西。
