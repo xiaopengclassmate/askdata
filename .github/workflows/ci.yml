@@ -22,6 +22,9 @@ jobs:
       - name: 造演示数据（固定种子）
         run: python db/seed.py
 
+      - name: 校验评测集的标准答案（不调模型）
+        run: python eval/check_questions.py
+
       - name: 单测（不调大模型）
         run: python -m pytest -q tests
 

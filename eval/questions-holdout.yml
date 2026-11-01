@@ -1,68 +1,346 @@
-# 留出集：20 条**没有参与过任何 prompt 调整**的问题。
+# 留出集：60 条**没有参与过任何 prompt 调整**的问题（v1 = 最早那 20 条，v2 = 2026-11-01 扩的 40 条）。
 #
 # 和 questions.yml 的区别只有这一点：写完之后就冻结，跑出来的数字不管好坏都照实记录，
 # 不为了让它变好看去改提示词（改了这套题就变成训练集，失去意义）。
 #
 # 覆盖面和开发集错开：会员等级 × 退款、渠道客单价、复购客户、取消率、商品数占比等。
+# 题型字段 cat 的含义和开发集一致，跑完可以按题型看留出集的通过率。
+#
+# 现状（如实记录）：
+#   v1 20 条 —— 同一份 prompt 跑出 19/20，唯一失败是「停售商品占比」答成百分数
+#   v2 40 条 —— 2026-11-01 后加的，还没复跑，等有 key 时补数字
 
-- q: 银卡会员贡献了多少营收
+# ---------------------------------------------------------------------------
+# v1（原有 20 条，题目和标准答案一字未改，只补了 cat/batch）
+# ---------------------------------------------------------------------------
+
+- cat: customer
+  batch: v1
+  q: 银卡会员贡献了多少营收
   sql: "SELECT ROUND(SUM(o.total_amount - o.discount_amount), 2) FROM orders o JOIN customer c ON c.id = o.customer_id WHERE o.status <> '已取消' AND c.level = '银卡'"
 
-- q: 各门店一共卖出了多少件商品
+- cat: join
+  batch: v1
+  q: 各门店一共卖出了多少件商品
   sql: "SELECT s.name, SUM(i.quantity) FROM order_item i JOIN orders o ON o.id = i.order_id JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' GROUP BY s.name ORDER BY 2 DESC"
 
-- q: 华东区有几家门店
+- cat: metric
+  batch: v1
+  q: 华东区有几家门店
   sql: "SELECT COUNT(*) FROM store WHERE region = '华东'"
 
-- q: 平均每笔订单买了几件商品
+- cat: metric
+  batch: v1
+  q: 平均每笔订单买了几件商品
   sql: "SELECT ROUND(SUM(i.quantity) * 1.0 / COUNT(DISTINCT o.id), 2) FROM order_item i JOIN orders o ON o.id = i.order_id WHERE o.status <> '已取消'"
 
-- q: 复购过的客户有多少人
+- cat: customer
+  batch: v1
+  q: 复购过的客户有多少人
   sql: "SELECT COUNT(*) FROM (SELECT customer_id FROM orders WHERE status <> '已取消' GROUP BY customer_id HAVING COUNT(*) >= 2)"
 
-- q: 客单价最高的门店
+- cat: topn
+  batch: v1
+  q: 客单价最高的门店
   sql: "SELECT s.name FROM orders o JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' GROUP BY s.name ORDER BY SUM(o.total_amount - o.discount_amount) * 1.0 / COUNT(DISTINCT o.id) DESC LIMIT 1"
 
-- q: 哪个门店的退款金额最多
+- cat: topn
+  batch: v1
+  q: 哪个门店的退款金额最多
   sql: "SELECT s.name FROM refund r JOIN orders o ON o.id = r.order_id JOIN store s ON s.id = o.store_id WHERE r.status = '已退款' GROUP BY s.name ORDER BY SUM(r.amount) DESC LIMIT 1"
 
-- q: 停售商品占全部商品的比例是多少
+- cat: ratio
+  batch: v1
+  q: 停售商品占全部商品的比例是多少
   sql: "SELECT ROUND(SUM(CASE WHEN status = '停售' THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 4) FROM product"
 
-- q: 各渠道的客单价
+- cat: group
+  batch: v1
+  q: 各渠道的客单价
   sql: "SELECT channel, ROUND(SUM(total_amount - discount_amount) * 1.0 / COUNT(DISTINCT id), 2) FROM orders WHERE status <> '已取消' GROUP BY channel ORDER BY 2 DESC"
 
-- q: 各会员等级的退款金额
+- cat: customer
+  batch: v1
+  q: 各会员等级的退款金额
   sql: "SELECT c.level, ROUND(SUM(r.amount), 2) FROM refund r JOIN orders o ON o.id = r.order_id JOIN customer c ON c.id = o.customer_id WHERE r.status = '已退款' GROUP BY c.level ORDER BY 2 DESC"
 
-- q: 去年注册的客户有多少人
+- cat: time
+  batch: v1
+  q: 去年注册的客户有多少人
   sql: "SELECT COUNT(*) FROM customer WHERE registered_at >= date('now','start of year','-1 year') AND registered_at < date('now','start of year')"
   sql_pg: "SELECT COUNT(*) FROM customer WHERE registered_at >= date_trunc('year', now()) - interval '1 year' AND registered_at < date_trunc('year', now())"
 
-- q: 平均每笔退款多少钱
+- cat: metric
+  batch: v1
+  q: 平均每笔退款多少钱
   sql: "SELECT ROUND(AVG(amount), 2) FROM refund WHERE status = '已退款'"
 
-- q: 库存最少的门店
+- cat: snapshot
+  batch: v1
+  q: 库存最少的门店
   sql: "SELECT s.name FROM inventory_snapshot v JOIN store s ON s.id = v.store_id WHERE v.snapshot_date = (SELECT MAX(snapshot_date) FROM inventory_snapshot) GROUP BY s.name ORDER BY SUM(v.stock) ASC LIMIT 1"
 
-- q: 客单价超过 2000 元的门店有哪些
+- cat: topn
+  batch: v1
+  q: 客单价超过 2000 元的门店有哪些
   sql: "SELECT s.name FROM orders o JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' GROUP BY s.name HAVING SUM(o.total_amount - o.discount_amount) * 1.0 / COUNT(DISTINCT o.id) > 2000 ORDER BY s.name"
 
-- q: 销量最高的 5 个品类
+- cat: topn
+  batch: v1
+  q: 销量最高的 5 个品类
   sql: "SELECT c.name, SUM(i.quantity) FROM order_item i JOIN product p ON p.id = i.product_id JOIN category c ON c.id = p.category_id JOIN orders o ON o.id = i.order_id WHERE o.status <> '已取消' GROUP BY c.name ORDER BY 2 DESC LIMIT 5"
 
-- q: 有多少订单享受了优惠
+- cat: metric
+  batch: v1
+  q: 有多少订单享受了优惠
   sql: "SELECT COUNT(*) FROM orders WHERE status <> '已取消' AND discount_amount > 0"
 
-- q: 平均每个客户消费多少钱
+- cat: metric
+  batch: v1
+  q: 平均每个客户消费多少钱
   sql: "SELECT ROUND(SUM(total_amount - discount_amount) * 1.0 / COUNT(DISTINCT customer_id), 2) FROM orders WHERE status <> '已取消'"
 
-- q: 前天的订单量
+- cat: time
+  batch: v1
+  q: 前天的订单量
   sql: "SELECT COUNT(*) FROM orders WHERE status <> '已取消' AND paid_at >= date('now','-2 days') AND paid_at < date('now','-1 days')"
   sql_pg: "SELECT COUNT(*) FROM orders WHERE status <> '已取消' AND paid_at >= current_date - 2 AND paid_at < current_date - 1"
 
-- q: 各品类的退款金额
+- cat: group
+  batch: v1
+  q: 各品类的退款金额
   sql: "SELECT c.name, ROUND(SUM(r.amount), 2) FROM refund r JOIN order_item i ON i.id = r.order_item_id JOIN product p ON p.id = i.product_id JOIN category c ON c.id = p.category_id WHERE r.status = '已退款' GROUP BY c.name ORDER BY 2 DESC"
 
-- q: 各门店的订单取消率
+- cat: ratio
+  batch: v1
+  q: 各门店的订单取消率
   sql: "SELECT s.name, ROUND(SUM(CASE WHEN o.status = '已取消' THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 4) FROM orders o JOIN store s ON s.id = o.store_id GROUP BY s.name ORDER BY 2 DESC"
+
+# ---------------------------------------------------------------------------
+# v2（2026-11-01 扩的 40 条，按题型分组；尚未复跑）
+# ---------------------------------------------------------------------------
+
+# ---- time ----
+
+- cat: time
+  batch: v2
+  q: 本月营收是多少
+  sql: "SELECT ROUND(SUM(total_amount - discount_amount), 2) FROM orders WHERE status <> '已取消' AND paid_at >= date('now','start of month')"
+  sql_pg: "SELECT ROUND(SUM(total_amount - discount_amount), 2) FROM orders WHERE status <> '已取消' AND paid_at >= date_trunc('month', now())"
+
+- cat: time
+  batch: v2
+  q: 最近 60 天的订单量
+  sql: "SELECT COUNT(DISTINCT id) FROM orders WHERE status <> '已取消' AND paid_at >= date('now','-60 days')"
+  sql_pg: "SELECT COUNT(DISTINCT id) FROM orders WHERE status <> '已取消' AND paid_at >= current_date - 60"
+
+- cat: time
+  batch: v2
+  q: 最近 5 天的退款金额
+  sql: "SELECT ROUND(SUM(amount), 2) FROM refund WHERE status = '已退款' AND created_at >= date('now','-5 days')"
+  sql_pg: "SELECT ROUND(SUM(amount), 2) FROM refund WHERE status = '已退款' AND created_at >= current_date - 5"
+
+- cat: time
+  batch: v2
+  q: 去年各个月分别有多少单
+  sql: "SELECT strftime('%Y-%m', paid_at) AS m, COUNT(DISTINCT id) FROM orders WHERE status <> '已取消' AND paid_at >= date('now','start of year','-1 year') AND paid_at < date('now','start of year') GROUP BY m ORDER BY m"
+  sql_pg: "SELECT to_char(paid_at, 'YYYY-MM') AS m, COUNT(DISTINCT id) FROM orders WHERE status <> '已取消' AND paid_at >= date_trunc('year', now()) - interval '1 year' AND paid_at < date_trunc('year', now()) GROUP BY m ORDER BY m"
+
+# ---- metric ----
+
+- cat: metric
+  batch: v2
+  q: 商品平均每件卖多少钱
+  sql: "SELECT ROUND(AVG(i.unit_price), 2) FROM order_item i JOIN orders o ON o.id = i.order_id WHERE o.status <> '已取消'"
+
+- cat: metric
+  batch: v2
+  q: 各支付状态的营收分别是多少
+  sql: "SELECT status, ROUND(SUM(total_amount - discount_amount), 2) FROM orders GROUP BY status ORDER BY 2 DESC"
+
+- cat: metric
+  batch: v2
+  q: 累计卖出了多少件商品
+  sql: "SELECT SUM(i.quantity) FROM order_item i JOIN orders o ON o.id = i.order_id WHERE o.status <> '已取消'"
+
+- cat: metric
+  batch: v2
+  q: 退款总笔数是多少
+  sql: "SELECT COUNT(*) FROM refund"
+
+- cat: metric
+  batch: v2
+  q: 各门店平均每笔订单买了几件商品
+  sql: "SELECT s.name, ROUND(SUM(i.quantity) * 1.0 / COUNT(DISTINCT o.id), 2) FROM order_item i JOIN orders o ON o.id = i.order_id JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' GROUP BY s.name ORDER BY 2 DESC"
+
+# ---- group ----
+
+- cat: group
+  batch: v2
+  q: 各门店各渠道的订单量
+  sql: "SELECT s.name, o.channel, COUNT(*) FROM orders o JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' GROUP BY s.name, o.channel ORDER BY s.name, o.channel"
+
+- cat: group
+  batch: v2
+  q: 各品类商品的平均售价
+  sql: "SELECT c.name, ROUND(AVG(p.price), 2) FROM product p JOIN category c ON c.id = p.category_id GROUP BY c.name ORDER BY 2 DESC"
+
+- cat: group
+  batch: v2
+  q: 各区域有多少客户
+  sql: "SELECT s.region, COUNT(DISTINCT o.customer_id) FROM orders o JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' GROUP BY s.region ORDER BY 2 DESC"
+
+- cat: group
+  batch: v2
+  q: 各会员等级的退款笔数
+  sql: "SELECT c.level, COUNT(*) FROM refund r JOIN orders o ON o.id = r.order_id JOIN customer c ON c.id = o.customer_id GROUP BY c.level ORDER BY 2 DESC"
+
+# ---- topn ----
+
+- cat: topn
+  batch: v2
+  q: 营收最低的门店
+  sql: "SELECT s.name FROM orders o JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' GROUP BY s.name ORDER BY SUM(o.total_amount - o.discount_amount) ASC LIMIT 1"
+
+- cat: topn
+  batch: v2
+  q: 单笔订单里买最多件商品的是哪一单
+  sql: "SELECT o.order_no FROM order_item i JOIN orders o ON o.id = i.order_id WHERE o.status <> '已取消' GROUP BY o.order_no ORDER BY SUM(i.quantity) DESC LIMIT 1"
+
+- cat: topn
+  batch: v2
+  q: 复购次数最多的客户是谁
+  sql: "SELECT c.name FROM orders o JOIN customer c ON c.id = o.customer_id WHERE o.status <> '已取消' GROUP BY c.name ORDER BY COUNT(*) DESC LIMIT 1"
+
+- cat: topn
+  batch: v2
+  q: 哪一种退款原因的退款金额最高
+  sql: "SELECT reason FROM refund WHERE status = '已退款' GROUP BY reason ORDER BY SUM(amount) DESC LIMIT 1"
+
+- cat: topn
+  batch: v2
+  q: 销售额最低的 3 个商品
+  sql: "SELECT p.name, ROUND(SUM(i.amount), 2) FROM order_item i JOIN product p ON p.id = i.product_id JOIN orders o ON o.id = i.order_id WHERE o.status <> '已取消' GROUP BY p.name ORDER BY 2 ASC LIMIT 3"
+
+# ---- ratio ----
+
+- cat: ratio
+  batch: v2
+  q: 全部订单的取消率是多少
+  sql: "SELECT ROUND(SUM(CASE WHEN status = '已取消' THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 4) FROM orders"
+
+- cat: ratio
+  batch: v2
+  q: 退款金额占实收金额的比例
+  sql: "SELECT ROUND((SELECT SUM(amount) FROM refund WHERE status = '已退款') * 1.0 / (SELECT SUM(total_amount - discount_amount) FROM orders WHERE status <> '已取消'), 4)"
+
+- cat: ratio
+  batch: v2
+  q: 金卡会员的订单量占全部订单的比例
+  sql: "SELECT ROUND(SUM(CASE WHEN c.level = '金卡' THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 4) FROM orders o JOIN customer c ON c.id = o.customer_id WHERE o.status <> '已取消'"
+
+- cat: ratio
+  batch: v2
+  q: 各门店销量占全部销量的比例
+  sql: "SELECT s.name, ROUND(SUM(i.quantity) * 1.0 / (SELECT SUM(i2.quantity) FROM order_item i2 JOIN orders o2 ON o2.id = i2.order_id WHERE o2.status <> '已取消'), 4) FROM order_item i JOIN orders o ON o.id = i.order_id JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' GROUP BY s.name ORDER BY 2 DESC"
+
+- cat: ratio
+  batch: v2
+  q: 有退款的订单占已完成订单的比例是多少
+  sql: "SELECT ROUND((SELECT COUNT(DISTINCT order_id) FROM refund WHERE status = '已退款') * 1.0 / (SELECT COUNT(*) FROM orders WHERE status = '已完成'), 4)"
+
+# ---- join ----
+
+- cat: join
+  batch: v2
+  q: 各门店各会员等级的订单量
+  sql: "SELECT s.name, c.level, COUNT(*) FROM orders o JOIN store s ON s.id = o.store_id JOIN customer c ON c.id = o.customer_id WHERE o.status <> '已取消' GROUP BY s.name, c.level ORDER BY s.name, c.level"
+
+- cat: join
+  batch: v2
+  q: 各品类在各渠道的销量
+  sql: "SELECT c.name, o.channel, SUM(i.quantity) FROM order_item i JOIN product p ON p.id = i.product_id JOIN category c ON c.id = p.category_id JOIN orders o ON o.id = i.order_id WHERE o.status <> '已取消' GROUP BY c.name, o.channel ORDER BY c.name, o.channel"
+
+- cat: join
+  batch: v2
+  q: 各门店的毛利率
+  sql: "SELECT s.name, ROUND((SUM(i.amount) - SUM(p.cost * i.quantity)) * 1.0 / SUM(i.amount), 4) FROM order_item i JOIN product p ON p.id = i.product_id JOIN orders o ON o.id = i.order_id JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' GROUP BY s.name ORDER BY 2 DESC"
+
+- cat: join
+  batch: v2
+  q: 各退款原因涉及的品类数量
+  sql: "SELECT r.reason, COUNT(DISTINCT p.category_id) FROM refund r JOIN order_item i ON i.id = r.order_item_id JOIN product p ON p.id = i.product_id GROUP BY r.reason ORDER BY 2 DESC"
+
+# ---- negate ----
+
+- cat: negate
+  batch: v2
+  q: 从来没有被退款过的订单有多少
+  sql: "SELECT COUNT(*) FROM orders WHERE status <> '已取消' AND id NOT IN (SELECT order_id FROM refund)"
+
+- cat: negate
+  batch: v2
+  q: 没有任何退款记录的门店有几家
+  sql: "SELECT COUNT(*) FROM store WHERE id NOT IN (SELECT o.store_id FROM refund r JOIN orders o ON o.id = r.order_id)"
+
+- cat: negate
+  batch: v2
+  q: 金卡会员里没有用过优惠的订单有多少
+  sql: "SELECT COUNT(*) FROM orders o JOIN customer c ON c.id = o.customer_id WHERE o.status <> '已取消' AND c.level = '金卡' AND o.discount_amount = 0"
+
+- cat: negate
+  batch: v2
+  q: 华北和西南两个区域之外的营收
+  sql: "SELECT ROUND(SUM(o.total_amount - o.discount_amount), 2) FROM orders o JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' AND s.region NOT IN ('华北','西南')"
+
+# ---- snapshot ----
+
+- cat: snapshot
+  batch: v2
+  q: 今天所有门店的库存总量
+  sql: "SELECT SUM(v.stock) FROM inventory_snapshot v WHERE v.snapshot_date = (SELECT MAX(snapshot_date) FROM inventory_snapshot)"
+
+- cat: snapshot
+  batch: v2
+  q: 昨天卖得最多的商品是哪一款
+  sql: "SELECT p.name FROM inventory_snapshot v JOIN product p ON p.id = v.product_id WHERE v.snapshot_date = (SELECT MAX(snapshot_date) FROM inventory_snapshot) GROUP BY p.name ORDER BY SUM(v.sold) DESC LIMIT 1"
+
+- cat: snapshot
+  batch: v2
+  q: 库存快照最早是哪一天
+  sql: "SELECT MIN(snapshot_date) FROM inventory_snapshot"
+
+# ---- customer ----
+
+- cat: customer
+  batch: v2
+  q: 金卡会员平均消费多少钱
+  sql: "SELECT ROUND(SUM(o.total_amount - o.discount_amount) / COUNT(DISTINCT c.id), 2) FROM orders o JOIN customer c ON c.id = o.customer_id WHERE o.status <> '已取消' AND c.level = '金卡'"
+
+- cat: customer
+  batch: v2
+  q: 男客户和女客户各有多少人
+  sql: "SELECT gender, COUNT(*) FROM customer GROUP BY gender ORDER BY 2 DESC"
+
+- cat: customer
+  batch: v2
+  q: 各会员等级贡献的销量分别是多少
+  sql: "SELECT c.level, SUM(i.quantity) FROM order_item i JOIN orders o ON o.id = i.order_id JOIN customer c ON c.id = o.customer_id WHERE o.status <> '已取消' GROUP BY c.level ORDER BY 2 DESC"
+
+# ---- compare ----
+
+- cat: compare
+  batch: v2
+  q: 华东区和华南区的营收差多少
+  sql: "SELECT ROUND(SUM(CASE WHEN s.region = '华东' THEN o.total_amount - o.discount_amount ELSE 0 END) - SUM(CASE WHEN s.region = '华南' THEN o.total_amount - o.discount_amount ELSE 0 END), 2) FROM orders o JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消'"
+
+- cat: compare
+  batch: v2
+  q: 最近 30 天比之前 30 天多赚了多少
+  sql: "SELECT ROUND(SUM(CASE WHEN paid_at >= date('now','-30 days') THEN total_amount - discount_amount ELSE 0 END) - SUM(CASE WHEN paid_at >= date('now','-60 days') AND paid_at < date('now','-30 days') THEN total_amount - discount_amount ELSE 0 END), 2) FROM orders WHERE status <> '已取消' AND paid_at >= date('now','-60 days')"
+  sql_pg: "SELECT ROUND(SUM(CASE WHEN paid_at >= current_date - 30 THEN total_amount - discount_amount ELSE 0 END) - SUM(CASE WHEN paid_at >= current_date - 60 AND paid_at < current_date - 30 THEN total_amount - discount_amount ELSE 0 END), 2) FROM orders WHERE status <> '已取消' AND paid_at >= current_date - 60"
+
+- cat: compare
+  batch: v2
+  q: 男客户和女客户的客单价差多少
+  sql: "SELECT ROUND(SUM(CASE WHEN c.gender = '女' THEN o.total_amount - o.discount_amount ELSE 0 END) / COUNT(DISTINCT CASE WHEN c.gender = '女' THEN o.id END) - SUM(CASE WHEN c.gender = '男' THEN o.total_amount - o.discount_amount ELSE 0 END) / COUNT(DISTINCT CASE WHEN c.gender = '男' THEN o.id END), 2) FROM orders o JOIN customer c ON c.id = o.customer_id WHERE o.status <> '已取消'"

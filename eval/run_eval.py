@@ -1,13 +1,18 @@
-"""评测脚本：跑完整 60 条问题，用「结果集比对」判对错。
+"""评测脚本：跑完整评测集，用「结果集比对」判对错。
 
 用法：
     python eval/run_eval.py                # 完整链路（语义层 + 自修复，最多 3 次）
     python eval/run_eval.py --mode baseline  # 基线：不校验语义、不重试（模拟裸 prompt）
     python eval/run_eval.py --limit 10     # 先跑 10 条看看
+    python eval/run_eval.py --questions questions-holdout.yml --out result-holdout.json
     DATABASE_URL=postgresql://... python eval/run_eval.py   # 在 PostgreSQL 上跑
 
 两种模式跑同一个评测集，才有「X% → Y%」这个数字可讲。
 标准答案分方言：带 sql_pg 的题，在 PostgreSQL 上会用那一份。
+
+跑完除了总准确率，还按两个维度拆开报：
+  cat    题型 —— 错得集中在哪个题型，才知道下一步该动哪里
+  batch  v1/v2 —— 扩题前后分开算，免得新题把历史数字冲淡
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ import argparse
 import json
 import sys
 import time
+from collections import defaultdict
 from pathlib import Path
 
 import yaml
@@ -47,6 +53,29 @@ def golden_rows(sql: str) -> list[tuple]:
     return _norm_rows(result.columns, result.rows)
 
 
+def _tally(outcomes: list[dict], key: str) -> dict[str, dict]:
+    """按维度汇总：每个取值多少题、通过多少、失败的是哪几题"""
+    groups: dict[str, dict] = defaultdict(lambda: {"total": 0, "passed": 0, "failed": []})
+    for item in outcomes:
+        g = groups[item[key]]
+        g["total"] += 1
+        if item["ok"]:
+            g["passed"] += 1
+        else:
+            g["failed"].append(item["q"])
+    for g in groups.values():
+        g["accuracy"] = round(g["passed"] / g["total"], 4)
+    # 通过率低的排前面：一眼看到短板
+    return dict(sorted(groups.items(), key=lambda kv: kv[1]["accuracy"]))
+
+
+def _print_table(title: str, groups: dict[str, dict]) -> None:
+    print(f"\n{title}")
+    for name, g in groups.items():
+        print(f"  {name:<9} {g['passed']:>3}/{g['total']:<3} = {g['accuracy'] * 100:5.1f}%"
+              + (f"   失败：{'、'.join(g['failed'][:3])}" if g["failed"] else ""))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["full", "baseline"], default="full")
@@ -68,6 +97,7 @@ def main() -> None:
         semantic.check = lambda sql: []  # type: ignore[assignment]
 
     passed, failed = 0, []
+    outcomes: list[dict] = []
     started = time.monotonic()
 
     for i, item in enumerate(questions, 1):
@@ -91,11 +121,18 @@ def main() -> None:
             else:
                 detail = f"结果不符：期望 {expected[:2]} 实得 {got[:2]}"
 
+        outcomes.append({
+            "q": question,
+            "cat": item.get("cat", "uncategorized"),
+            "batch": item.get("batch", "v1"),
+            "ok": ok,
+        })
         if ok:
             passed += 1
             mark = "PASS"
         else:
-            failed.append({"q": question, "detail": detail,
+            failed.append({"q": question, "cat": item.get("cat", ""),
+                           "batch": item.get("batch", ""), "detail": detail,
                            "sql": result.get("sql", "")})
             mark = "FAIL"
         print(f"[{i:>2}/{len(questions)}] {mark}  {question}"
@@ -103,13 +140,18 @@ def main() -> None:
 
     elapsed = time.monotonic() - started
     n = len(questions)
+    by_category = _tally(outcomes, "cat")
+    by_batch = _tally(outcomes, "batch")
     summary = {
         "mode": args.mode,
+        "questions": args.questions,
         "total": n,
         "passed": passed,
         "accuracy": round(passed / n, 4),
         "elapsed_seconds": round(elapsed, 1),
         "avg_seconds_per_question": round(elapsed / n, 2),
+        "by_category": by_category,
+        "by_batch": by_batch,
         "failed": failed,
     }
 
@@ -119,7 +161,10 @@ def main() -> None:
     print("\n" + "=" * 60)
     print(f"模式 {args.mode}：{passed}/{n} = {summary['accuracy'] * 100:.1f}%  "
           f"耗时 {summary['elapsed_seconds']}s（平均 {summary['avg_seconds_per_question']}s/题）")
-    print(f"明细写到 {out}")
+    _print_table("按题型（通过率低的在前）：", by_category)
+    if len(by_batch) > 1:
+        _print_table("按批次：", by_batch)
+    print(f"\n明细写到 {out}")
 
 
 if __name__ == "__main__":

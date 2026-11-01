@@ -70,7 +70,7 @@ def backends():
 def test_all_eval_sql_matches_between_engines(backends):
     sqlite_be, pg_be = backends
     cases = _cases()
-    assert len(cases) >= 86, f"评测集条数不对：{len(cases)}"
+    assert len(cases) >= 200, f"评测集条数不对：{len(cases)}"
 
     mismatched = []
     for label, sql_lite, sql_pg in cases:
