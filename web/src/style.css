@@ -235,6 +235,40 @@ tbody tr:hover { background: rgba(79, 140, 255, .06); }
   cursor: not-allowed;
 }
 
+/* 身份下拉：低调一点，别抢主输入框的视线 */
+.top-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.role {
+  min-height: 0;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 13px;
+  appearance: none;
+  cursor: pointer;
+}
+
+.role:hover { border-color: var(--accent); color: var(--text); }
+
+/* 受限身份下把「你看到的是哪部分」摆在结果最上面，避免被当成全量 */
+.scope {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(79, 140, 255, .08);
+  border: 1px solid rgba(79, 140, 255, .3);
+  color: #b9cdff;
+  font-size: 13px;
+}
+
+.scope .hint { color: var(--muted); }
+
 /* 结果自检判可疑时提示：结果是给了，但别当成准的用 */
 .warn {
   margin: 14px 0 0;

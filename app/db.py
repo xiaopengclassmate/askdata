@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .config import DB_PATH, settings
+from .permissions import Scope, apply_scope
 
 
 @dataclass
@@ -34,11 +35,23 @@ def _connect_readonly() -> sqlite3.Connection:
     return conn
 
 
-def execute_query(sql: str, timeout: float | None = None) -> QueryResult:
-    """执行一条已过安全网关的 SELECT，超时抛 QueryTimeout"""
+def execute_query(
+    sql: str, timeout: float | None = None, scope: Scope | None = None
+) -> QueryResult:
+    """执行一条已过安全网关的 SELECT，超时抛 QueryTimeout。
+
+    scope 非空时，先在连接上建好受限视图，再执行——权限在数据库层生效，
+    模型生成的 SQL 完全不需要知道这件事。
+    """
     timeout = timeout or settings.query_timeout_seconds
     deadline = time.monotonic() + timeout
     conn = _connect_readonly()
+    # 视图必须在执行前建好：TEMP 对象是连接级的，换了连接就没了
+    try:
+        apply_scope(conn, scope)
+    except Exception:
+        conn.close()
+        raise
 
     def _abort() -> int:
         # 返回非 0 让 SQLite 中断当前语句

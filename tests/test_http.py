@@ -78,6 +78,53 @@ def test_ask_end_to_end_with_fake_model(monkeypatch):
     assert body["rows"][0]["n"] > 0
 
 
+def test_query_scope_comes_from_header(monkeypatch):
+    """同一个接口，换个身份头，看到的数据必须不一样——而且是在 HTTP 层就生效"""
+    _fresh_limiter(monkeypatch)
+    sql = {"sql": "SELECT COUNT(*) AS n FROM orders"}
+
+    everyone = client.post("/api/query", json=sql).json()["rows"][0]["n"]
+    nanshan = client.post(
+        "/api/query", json=sql, headers={"x-demo-role": "sz-nanshan"}
+    ).json()["rows"][0]["n"]
+
+    assert 0 < nanshan < everyone
+
+
+def test_unknown_role_returns_400(monkeypatch):
+    _fresh_limiter(monkeypatch)
+    resp = client.post(
+        "/api/query", json={"sql": "SELECT 1"}, headers={"x-demo-role": "ceo"}
+    )
+    assert resp.status_code == 400
+    assert "未知身份" in resp.json()["detail"]
+
+
+def test_ask_reports_scope_and_restricts_rows(monkeypatch):
+    """主链路的权限验证：模型根本不知道身份，但结果只能是本店的"""
+    monkeypatch.setattr(settings, "dashscope_api_key", "sk-test")
+    _fresh_limiter(monkeypatch)
+    monkeypatch.setattr(
+        llm,
+        "complete",
+        lambda system, user: json.dumps(
+            {"sql": "SELECT COUNT(*) AS n FROM orders", "explanation": "", "chart": "metric"}
+        ),
+    )
+    body = client.post(
+        "/api/ask",
+        json={"question": "一共有多少订单"},
+        headers={"x-demo-role": "sz-nanshan"},
+    ).json()
+
+    assert body["ok"] is True
+    assert body["scope"]["role"] == "sz-nanshan"
+    assert body["scope"]["stores"] == [1]
+    assert body["rows"][0]["n"] < client.post(
+        "/api/query", json={"sql": "SELECT COUNT(*) AS n FROM orders"}
+    ).json()["rows"][0]["n"]
+
+
 def test_session_endpoints_roundtrip(monkeypatch):
     monkeypatch.setattr(settings, "dashscope_api_key", "sk-test")
     _fresh_limiter(monkeypatch)

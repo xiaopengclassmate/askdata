@@ -144,8 +144,11 @@ def _build_user_prompt(question: str, tables: list[str], error_hint: str = "",
     return "\n\n".join(parts)
 
 
-def answer(question: str, history: str = "") -> dict:
-    """跑完整条链路。返回 dict，包含 sql / 数据 / 图类型 / 重试次数 / 各阶段耗时。"""
+def answer(question: str, history: str = "", scope=None) -> dict:
+    """跑完整条链路。返回 dict，包含 sql / 数据 / 图类型 / 重试次数 / 各阶段耗时。
+
+    scope 是调用者的行级权限，会一路传到执行层；模型看不到也不需要看到它。
+    """
     started = time.monotonic()
 
     # 问题本身没说清时不猜，先反问（确定性规则，不消耗模型调用）
@@ -191,7 +194,7 @@ def answer(question: str, history: str = "") -> dict:
             continue
 
         try:
-            result = db.execute_query(guard.sql)
+            result = db.execute_query(guard.sql, scope=scope)
         except db.QueryTimeout as exc:
             last_error = f"查询超时：{exc}"
             hints.append(f"第 {attempt} 次 · {last_error}")

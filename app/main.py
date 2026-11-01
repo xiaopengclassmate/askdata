@@ -23,7 +23,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import db, ratelimit, session, sql_guard, text2sql
+from . import db, permissions, ratelimit, session, sql_guard, text2sql
 from .config import settings
 from .logging_setup import one_line, setup_logging
 from .ratelimit import LimitHit
@@ -49,6 +49,19 @@ class AskIn(BaseModel):
 def _too_many(exc: LimitHit) -> HTTPException:
     """限流统一转成 429 + Retry-After，让客户端知道等多久，而不是盲目重试。"""
     return HTTPException(429, exc.reason, headers={"Retry-After": str(exc.retry_after)})
+
+
+def _scope(request: Request):
+    """从请求头取身份，解析成行级权限。
+
+    真实系统这里应该是登录态里的用户 → 组织架构 → 可见门店；
+    demo 用三个预设身份，不传就是总部（看全部）。
+    """
+    role = request.headers.get("x-demo-role", "")
+    try:
+        return permissions.resolve(role)
+    except permissions.ScopeError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.middleware("http")
@@ -121,11 +134,12 @@ def run_query(payload: QueryIn, request: Request) -> dict:
     except LimitHit as exc:
         raise _too_many(exc) from exc
 
+    scope = _scope(request)
     guard = sql_guard.check(payload.sql)
     if not guard:
         raise HTTPException(400, guard.reason)
     try:
-        result = db.execute_query(guard.sql, payload.timeout)
+        result = db.execute_query(guard.sql, payload.timeout, scope=scope)
     except db.QueryTimeout as exc:
         raise HTTPException(408, str(exc)) from exc
     except Exception as exc:
@@ -146,6 +160,7 @@ def ask(payload: AskIn, request: Request) -> dict:
         raise HTTPException(503, "未配置 DASHSCOPE_API_KEY，先按 .env.example 建 .env")
 
     ip = ratelimit.client_ip(request)
+    scope = _scope(request)
     sid = payload.session_id or session.store.new_id()
 
     # ① 单 IP 频率
@@ -174,12 +189,14 @@ def ask(payload: AskIn, request: Request) -> dict:
             result = text2sql.answer(
                 payload.question,
                 history=session.render_history(session.store.history(sid)),
+                scope=scope,
             )
     except LimitHit as exc:  # 走到这里只可能是并发闸门（日额度已在里面转成 429）
         log.warning("ask limited=concurrency ip=%s reason=%s", ip, exc.reason)
         raise _too_many(exc) from exc
 
     result["session_id"] = sid
+    result["scope"] = scope.as_dict()  # 前端据此告诉用户「你看到的是哪部分数据」
 
     # 问题太含糊：正常返回反问，让前端提示用户补充，不是报错
     if result.get("need_clarify"):

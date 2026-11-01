@@ -16,6 +16,14 @@ const EXAMPLES = [
   '最近 7 天每天的订单量'
 ]
 
+// 演示用的三个身份。真实系统里这里应该来自登录态，不是下拉框。
+const ROLES = [
+  { value: '', label: '总部 · 全部门店' },
+  { value: 'south', label: '华南区经理 · 深圳广州' },
+  { value: 'sz-nanshan', label: '深圳南山店店长 · 本店' }
+]
+
+const role = ref('')
 const question = ref('')
 const loading = ref(false)
 const error = ref('')
@@ -47,9 +55,11 @@ async function ask() {
   disposeChart()
 
   try {
+    const headers = { 'Content-Type': 'application/json' }
+    if (role.value) headers['x-demo-role'] = role.value
     const resp = await fetch('/api/ask', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ question: question.value.trim(), session_id: sessionId.value || null })
     })
     const data = await resp.json()
@@ -69,6 +79,11 @@ async function ask() {
   } finally {
     loading.value = false
   }
+}
+
+// 换身份必须开新会话：上一轮 SQL 是另一个可见范围下写的，接着追问会把两套口径串在一起
+async function changeRole() {
+  await newSession()
 }
 
 async function newSession() {
@@ -196,7 +211,12 @@ onBeforeUnmount(() => {
     <header>
       <div class="top">
         <h1>AskData</h1>
-        <button v-if="turns" class="chip" @click="newSession">新会话（{{ turns }} 轮）</button>
+        <div class="top-right">
+          <select v-model="role" class="role" title="演示行级权限" @change="changeRole">
+            <option v-for="r in ROLES" :key="r.value" :value="r.value">{{ r.label }}</option>
+          </select>
+          <button v-if="turns" class="chip" @click="newSession">新会话（{{ turns }} 轮）</button>
+        </div>
       </div>
       <p class="sub">用中文问数据 · 生成 SQL 在只读沙箱执行 · 结果自动出图</p>
     </header>
@@ -229,6 +249,10 @@ onBeforeUnmount(() => {
     </div>
 
     <section v-if="result" class="result">
+      <p v-if="result.scope?.stores" class="scope">
+        当前身份：{{ result.scope.label }} —— 只统计你有权限的门店。
+        <span class="hint">（过滤发生在数据库层，SQL 里没有 WHERE 也一样生效）</span>
+      </p>
       <div class="head">
         <h2>{{ result.explanation || '查询结果' }}</h2>
         <div class="actions">

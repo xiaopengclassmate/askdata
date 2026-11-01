@@ -31,6 +31,7 @@
                  │  ③ 生成 SQL（DashScope / qwen-plus）         │
                  │  ④ 四道关卡                                  │
                  │     安全网关 → 语义层 → EXPLAIN → 只读执行    │
+                 │     （执行前按身份建 TEMP VIEW，行级权限生效） │
                  │  ⑤ 报错 / 结果为空 → 回喂模型重写，重试 ≤3 次  │
                  └───────────────┬──────────────────────────────┘
                                  ▼
@@ -54,11 +55,12 @@
 - [x] 多轮会话：`session_id` 带上最近 2 轮上文（追问"那上个月呢"不用重复说）
 - [x] 含糊问题反问：既没指标也没维度时先问清楚，不硬猜
 - [x] FastAPI 接口：`/health` `/api/schema` `/api/query` `/api/ask` `/api/session/{id}`
-- [x] Vue 3 + ECharts 前端（按需引入，构建产物 577 kB），构建后由 FastAPI 直接托管
+- [x] Vue 3 + ECharts 前端（按需引入，构建产物 579 kB），构建后由 FastAPI 直接托管
+- [x] 行级权限：按身份过滤门店，用 SQLite TEMP VIEW 在数据库层生效，模型全程无感
 - [x] 结果自检：SQL 合法但跑出空结果（0 行 / 聚合 NULL）时回喂模型重写
 - [x] 前端可「复制 SQL / 导出 CSV」（CSV 带 BOM，Excel 打开中文不乱码）
 - [x] 裸 SQL 口 `/api/query` 生产默认关闭（`ENABLE_RAW_SQL=false` 后一律 404）
-- [x] 单测 79 条（安全网关 / 语义层 / 会话 / 反问 / 链路 / 限流 / 结果自检 / 接口层）
+- [x] 单测 91 条（安全网关 / 语义层 / 会话 / 反问 / 链路 / 限流 / 结果自检 / 行级权限 / 接口层）
 - [x] 60 条开发集 + 结果集比对脚本 `eval/run_eval.py`（full / baseline 消融）
 - [x] 20 条留出集 `eval/questions-holdout.yml`（写完冻结，用来验证不是调出来的）
 - [x] 公网保护：每 IP 限流 + 全局日配额 + 并发闸门（`app/ratelimit.py`）
@@ -69,7 +71,6 @@
 
 待做：
 
-- [ ] 行级权限（按门店过滤数据）
 - [ ] 换 PostgreSQL 接真实数仓
 
 ## 目录
@@ -85,6 +86,7 @@ askdata/
 │   ├── clarify.py           # 含糊问题反问（纯规则）
 │   ├── session.py           # 多轮会话上下文（内存 + TTL）
 │   ├── sanity.py            # 结果自检（SQL 合法但返回空 → 判可疑，回喂重写）
+│   ├── permissions.py       # 行级权限（按身份建 TEMP VIEW，数据库层过滤）
 │   ├── ratelimit.py         # 公网保护：每 IP 限流 / 日配额 / 并发闸门
 │   ├── logging_setup.py     # 结构化日志（一行一条 key=value）
 │   ├── llm.py               # DashScope 兼容接口 + JSON 容错解析
@@ -99,7 +101,7 @@ askdata/
 │   ├── questions.yml        # 60 条开发集 + 标准 SQL
 │   ├── questions-holdout.yml# 20 条留出集（冻结，验证泛化）
 │   └── run_eval.py          # 结果集比对，full / baseline 两种模式
-├── tests/                   # 79 条单测
+├── tests/                   # 91 条单测
 ├── web/                     # Vue 3 + ECharts 前端
 ├── .github/workflows/ci.yml # push 时跑单测
 ├── Dockerfile               # node 构建前端 → python 运行时，单镜像
@@ -173,6 +175,50 @@ docker compose -f docker-compose.prod.yml up -d --build
 
 带 question 和 SQL 的原因很实际：线上答错了，光看状态码 `200` 没有任何信息量；有这两样，不登服务器也能复现。
 
+## 行级权限
+
+总部要全量，区域经理要自己片区的，店长只能看本店——这是 Text2SQL 上生产必过的一关，而且比普通后台更难：**SQL 是模型写的，你没法在代码里补 WHERE**。
+
+demo 里三个身份，通过 `x-demo-role` 请求头切换（前端右上角下拉框），不传就是总部：
+
+| 身份 | 可见门店 |
+|---|---|
+| 总部 `hq`（默认） | 全部 6 家 |
+| 华南区经理 `south` | 深圳、广州 |
+| 深圳南山店店长 `sz-nanshan` | 深圳南山店 |
+
+做法是**让数据库来过滤，而不是改 SQL**（`app/permissions.py`）：
+
+```sql
+CREATE TEMP VIEW orders AS SELECT * FROM main.orders WHERE store_id IN (1);
+```
+
+temp schema 优先级高于 main，所以模型生成的 `FROM orders` 会被 SQLite 自己重定向到过滤后的视图。`order_item` / `refund` 没有 `store_id`，顺着 `orders` 一起收窄：
+
+```sql
+CREATE TEMP VIEW order_item AS
+  SELECT * FROM main.order_item
+  WHERE order_id IN (SELECT id FROM main.orders WHERE store_id IN (1));
+```
+
+为什么不走另外两条路：
+
+- **靠提示词让模型自己加 `WHERE store_id = 1`**：模型会忘，换个问法就丢（「各门店营收」它根本不会加），被注入还能直接绕。权限放在模型能力里，等于没有。
+- **拿到 SQL 之后字符串改写/拼接条件**：子查询、CTE、UNION、`JOIN ... ON` 嵌套，手写注入条件总有覆盖不到的写法，漏一个就是越权。而且改写过的 SQL 和展示给用户看的 SQL 不一致，排查问题时会打架。
+
+TEMP VIEW 的好处是这条边界**不依赖模型的正确性**：模型写 `SELECT COUNT(*) FROM orders` 还是写三层嵌套 CTE，出来的都只有本店数据。
+
+几个细节：
+
+- **视图只在受限身份时建**，总部什么都不做——没人看得到过滤逻辑，也没有额外开销。
+- **TEMP 对象是连接级的**：每次查询新开连接、建视图、关连接，不会串到下一个请求（有单测专门钉这一条）。
+- **视图不可写**：想在 `orders` 上 `DELETE` 直接被 SQLite 拒，越权写这条路一起堵了。
+- 身份在 `/api/ask` 和 `/api/query` 都生效；`customer` / `product` / `category` 是全局维表，任何身份都能全看。
+- 响应里带 `scope` 字段，前端据此显示「当前身份：深圳南山店店长 —— 只统计你有权限的门店」，避免把部分数据当全量。
+- 未知身份返回 400 而不是悄悄降级成总部——**权限出问题时宁可报错，不能默认放行**。
+
+真实系统里身份来自登录态（用户 → 组织架构 → 可见门店），`DEMO_ROLES` 这份映射不该出现在代码里；TEMP VIEW 这套换成 PostgreSQL 就是 `SET LOCAL role` + 行级安全策略（RLS）。
+
 ## 业务口径（写在这里，也写进了 schema 目录）
 
 这几条是模型最容易错、面试官最爱问的地方：
@@ -211,6 +257,7 @@ docker compose -f docker-compose.prod.yml up -d --build
 4. **错误自修复**：执行报错时把数据库原文回喂模型重试（最多 3 次尝试），比调 prompt 更有效。
 5. **列形状单独成段、贴在问题后面**：问「哪个最」该出几列几行、问「前 5」该不该带指标列，这套规则放系统提示里模型经常不听话，贴近问题的位置才稳定（见下方评测里的 `SHAPE_HINT`）。
 6. **结果自检**：报错自修复只管「跑不起来」，但更常见的错法是 SQL 合法、跑出来是空的——聚合被 WHERE 全过滤掉返回 `NULL`，或者筛选值写成了库里不存在的叫法（模型很爱把「线上」扩写成「线上渠道」）。这两种没有任何异常可回喂，所以加一道按**结果**判的检查：0 行 / 单值 `NULL` 就判可疑，把原因当错误提回去让它重写。刻意判得很窄——`0`、负数、并列、超预期的大数一律不管，那些要么合法，要么得靠业务知识才判得了，硬判必然误伤正确答案。
+7. **权限下沉到数据库，不进提示词、不改写 SQL**：模型生成的 SQL 不该和用户身份绑定。用 TEMP VIEW 让 SQLite 自己把 `FROM orders` 改道到过滤后的视图，模型无感、不会被绕、也不存在「拼接漏了一种写法」的越权口子（详见上方「行级权限」）。
 
 ## 评测结果（2026-11-01 定稿）
 
