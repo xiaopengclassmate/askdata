@@ -2,7 +2,7 @@
   "total": 6,
   "passed": 5,
   "accuracy": 0.8333,
-  "elapsed_seconds": 39.5,
+  "elapsed_seconds": 45.3,
   "failed": [
     {
       "conversation": "各渠道订单量 → 看客单价",

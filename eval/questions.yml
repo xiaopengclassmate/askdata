@@ -178,7 +178,7 @@
 - q: 最近一天各门店的销售件数
   sql: "SELECT s.name, SUM(v.sold) FROM inventory_snapshot v JOIN store s ON s.id = v.store_id WHERE v.snapshot_date = (SELECT MAX(snapshot_date) FROM inventory_snapshot) GROUP BY s.name"
 
-- q: 库存快照覆盖了哪几天
+- q: 库存快照覆盖了几天
   sql: "SELECT COUNT(DISTINCT snapshot_date) FROM inventory_snapshot"
 
 - q: 深圳南山店昨天卖出多少件商品
