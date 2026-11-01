@@ -2,6 +2,9 @@
 
 用中文提问，自动生成 SQL、在只读沙箱里执行、把结果画成图。
 
+**在线地址**：<http://8.134.184.59:8130/>（演示库固定种子、每次容器重建重灌，数据日期跟着运行日走）
+代码：<https://github.com/xiaopengclassmate/askdata>
+
 > 简历定位：证明**Python 全栈 + AI 工程化**能力。
 > 和现有的 Java 项目（文档问答）不重复——这里考的是结构化数据、schema 理解与执行安全。
 
@@ -118,6 +121,18 @@ docker compose up -d --build
 ```
 
 镜像里没有任何密钥：`DASHSCOPE_API_KEY` 只从运行环境读，`.env` 在 `.gitignore` 和 `.dockerignore` 里都排除了。
+
+**小内存服务器**（现在线上那台只有 1.7G 内存，还跑着别的服务）：用 `Dockerfile.prebuilt` + `docker-compose.prod.yml`，前端在本地 `npm run build` 好再传，容器里不装 node，`mem_limit: 400m`（实测常驻约 50MB）：
+
+```bash
+npm --prefix web run build
+tar -czf askdata_deploy.tgz app db semantic_layer web/dist requirements.txt \
+    Dockerfile.prebuilt docker-compose.prod.yml   # 别带 db/*.db
+# 服务器上：解包 → 写 .env(600) → 起
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+两个坑：① 台机器内存紧张，**构建/首次启动那几秒 sshd 会失去响应**（banner exchange 超时），等一两分钟自己恢复，别急着重启；② 容器不挂 volume，重建就重灌演示库——演示数据带相对日期，留旧库会让「最近 7 天」查不到东西。
 
 ## 业务口径（写在这里，也写进了 schema 目录）
 
