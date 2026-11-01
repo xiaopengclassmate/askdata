@@ -5,6 +5,8 @@
 **在线地址**：<http://8.134.184.59:8130/>（演示库固定种子、每次容器重建重灌，数据日期跟着运行日走）
 代码：<https://github.com/xiaopengclassmate/askdata>
 
+![AskData 演示：中文提问 → 生成 SQL → 出图 → 追问继承](docs/screenshots/askdata-demo.gif)
+
 > 简历定位：证明**Python 全栈 + AI 工程化**能力。
 > 和现有的 Java 项目（文档问答）不重复——这里考的是结构化数据、schema 理解与执行安全。
 
@@ -67,7 +69,6 @@
 
 待做：
 
-- [ ] 录 demo GIF
 - [ ] 行级权限（按门店过滤数据）
 - [ ] 换 PostgreSQL 接真实数仓
 

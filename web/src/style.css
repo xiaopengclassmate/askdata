@@ -158,6 +158,11 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   border: 1px solid var(--line);
   color: #9ad0a0;
   font: 13px/1.5 ui-monospace, Consolas, monospace;
+  /* 生成的 SQL 常常一整行几百字符，不折行就得横向滚动才看得全 */
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
   overflow-x: auto;
 }
 
