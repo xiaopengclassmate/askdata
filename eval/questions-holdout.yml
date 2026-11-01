@@ -37,6 +37,7 @@
 
 - q: 去年注册的客户有多少人
   sql: "SELECT COUNT(*) FROM customer WHERE registered_at >= date('now','start of year','-1 year') AND registered_at < date('now','start of year')"
+  sql_pg: "SELECT COUNT(*) FROM customer WHERE registered_at >= date_trunc('year', now()) - interval '1 year' AND registered_at < date_trunc('year', now())"
 
 - q: 平均每笔退款多少钱
   sql: "SELECT ROUND(AVG(amount), 2) FROM refund WHERE status = '已退款'"
@@ -58,6 +59,7 @@
 
 - q: 前天的订单量
   sql: "SELECT COUNT(*) FROM orders WHERE status <> '已取消' AND paid_at >= date('now','-2 days') AND paid_at < date('now','-1 days')"
+  sql_pg: "SELECT COUNT(*) FROM orders WHERE status <> '已取消' AND paid_at >= current_date - 2 AND paid_at < current_date - 1"
 
 - q: 各品类的退款金额
   sql: "SELECT c.name, ROUND(SUM(r.amount), 2) FROM refund r JOIN order_item i ON i.id = r.order_item_id JOIN product p ON p.id = i.product_id JOIN category c ON c.id = p.category_id WHERE r.status = '已退款' GROUP BY c.name ORDER BY 2 DESC"

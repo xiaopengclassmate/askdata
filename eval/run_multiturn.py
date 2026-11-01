@@ -22,7 +22,7 @@ BASE = Path(__file__).resolve().parent
 ROOT = BASE.parent
 sys.path.insert(0, str(ROOT))
 
-from app import session, text2sql  # noqa: E402
+from app import dialect, session, text2sql  # noqa: E402
 from eval.run_eval import _norm_rows, golden_rows  # noqa: E402
 
 
@@ -39,7 +39,8 @@ def main() -> None:
     started = time.monotonic()
 
     for i, conv in enumerate(convs, 1):
-        expected = golden_rows(conv["sql"])
+        gold = conv.get("sql_pg") or conv["sql"] if dialect.engine() == "postgres" else conv["sql"]
+        expected = golden_rows(gold)
         store = session.SessionStore()
         sid = store.new_id()
 

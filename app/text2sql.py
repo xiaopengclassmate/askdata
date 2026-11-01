@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import time
 
-from . import clarify, db, llm, sanity, semantic, sql_guard
+from . import clarify, db, dialect, llm, sanity, semantic, sql_guard
 from .config import settings
 from .schema_catalog import TABLE_DOCS, render_schema
 
@@ -22,7 +22,7 @@ MAX_ATTEMPTS = 3
 # 评测时关掉语义层段落做消融对比用；线上始终为 True
 USE_SEMANTIC_PROMPT = True
 
-SYSTEM_PROMPT = """你是一名资深数据分析师，负责把中文业务问题翻译成 SQLite 查询。
+SYSTEM_PROMPT = """你是一名资深数据分析师，负责把中文业务问题翻译成 {dialect} 查询。
 
 只输出一个 JSON 对象，不要任何解释文字，格式：
 {"sql": "SELECT ...", "explanation": "一句话说明这条 SQL 在算什么", "chart": "line|bar|pie|table|metric"}
@@ -170,7 +170,8 @@ def answer(question: str, history: str = "", scope=None) -> dict:
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         raw = llm.complete(
-            SYSTEM_PROMPT, _build_user_prompt(question, tables, last_error, history)
+            dialect.system_prompt(SYSTEM_PROMPT),
+            _build_user_prompt(question, tables, last_error, history),
         )
         payload = llm.parse_sql_json(raw)
         sql = (payload.get("sql") or "").strip()

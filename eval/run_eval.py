@@ -4,8 +4,10 @@
     python eval/run_eval.py                # 完整链路（语义层 + 自修复，最多 3 次）
     python eval/run_eval.py --mode baseline  # 基线：不校验语义、不重试（模拟裸 prompt）
     python eval/run_eval.py --limit 10     # 先跑 10 条看看
+    DATABASE_URL=postgresql://... python eval/run_eval.py   # 在 PostgreSQL 上跑
 
 两种模式跑同一个评测集，才有「X% → Y%」这个数字可讲。
+标准答案分方言：带 sql_pg 的题，在 PostgreSQL 上会用那一份。
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ BASE = Path(__file__).resolve().parent
 ROOT = BASE.parent
 sys.path.insert(0, str(ROOT))
 
-from app import db, semantic, sql_guard, text2sql  # noqa: E402
+from app import db, dialect, semantic, sql_guard, text2sql  # noqa: E402
 
 
 def _norm_rows(columns: list[str], rows: list[dict]) -> list[tuple]:
@@ -69,7 +71,12 @@ def main() -> None:
     started = time.monotonic()
 
     for i, item in enumerate(questions, 1):
-        question, gold_sql = item["q"], item["sql"]
+        question = item["q"]
+        # 标准答案也分方言：PostgreSQL 上要用 date_trunc / interval 那一份
+        if dialect.engine() == "postgres":
+            gold_sql = item.get("sql_pg") or item["sql"]
+        else:
+            gold_sql = item["sql"]
         expected = golden_rows(gold_sql)
 
         result = text2sql.answer(question)

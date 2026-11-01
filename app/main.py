@@ -23,7 +23,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import db, permissions, ratelimit, session, sql_guard, text2sql
+from . import db, dialect, permissions, ratelimit, session, sql_guard, text2sql
 from .config import settings
 from .logging_setup import one_line, setup_logging
 from .ratelimit import LimitHit
@@ -104,6 +104,8 @@ def health() -> dict:
     return {
         "ok": True,
         "llm_enabled": settings.llm_enabled,
+        # 当前跑在哪个引擎上：换库之后一眼能确认，不用翻环境变量
+        "backend": dialect.engine(),
         "tables": stats,
         # 剩余额度露出来，方便自己一眼看出是不是被刷了（-1 表示不限额）
         "daily_quota_left": ratelimit.limiter.remaining_daily(

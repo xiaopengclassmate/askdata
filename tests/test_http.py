@@ -26,6 +26,8 @@ def test_health_reports_quota():
     assert body["ok"] is True
     assert "daily_quota_left" in body
     assert "orders" in body["tables"]
+    # 当前引擎：没配 DATABASE_URL 就是 sqlite，配了 PostgreSQL 就该是 postgres
+    assert body["backend"] in ("sqlite", "postgres")
 
 
 def test_schema_endpoint_serves_prompt_material():

@@ -24,3 +24,42 @@ jobs:
 
       - name: 单测（不调大模型）
         run: python -m pytest -q tests
+
+  postgres:
+    # 同一套代码换引擎再跑一遍：两个引擎的结果集必须一致
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: askdata
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PG_URL: postgresql://postgres:postgres@localhost:5432/askdata
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/askdata
+      TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/askdata
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖（含 PostgreSQL 驱动）
+        run: pip install -r requirements.txt -r requirements-postgres.txt
+
+      - name: 造数据（两个引擎各一份，同一个随机种子）
+        run: |
+          python db/seed.py
+          python db/seed.py --url "$PG_URL"
+
+      - name: 单测 + 两引擎结果集比对
+        run: python -m pytest -q tests

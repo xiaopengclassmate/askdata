@@ -14,6 +14,7 @@ from pathlib import Path
 
 import yaml
 
+from . import dialect
 from .schema_catalog import TABLE_DOCS
 
 SEMANTIC_FILE = Path(__file__).resolve().parent.parent / "semantic_layer" / "retail.yml"
@@ -38,6 +39,23 @@ def load() -> dict:
         return yaml.safe_load(fh)
 
 
+def _conventions(model: dict) -> list[str]:
+    """展开口径列表：@time 换成当前引擎的时间写法，其余原样。
+
+    之所以用占位符而不是整段复制一份，是因为两条规则之间的顺序会影响模型
+    的遵循度，复制一份迟早会改漏一处。
+    """
+    engine = dialect.engine()
+    time_rules = (model.get("conventions_time") or {}).get(engine, [])
+    out: list[str] = []
+    for line in model.get("conventions", []):
+        if str(line).strip().startswith("@time"):
+            out.extend(time_rules)
+        else:
+            out.append(line)
+    return out
+
+
 def render_prompt_block() -> str:
     """渲染成 prompt 里的一段：指标 + 口径 + 示例"""
     model = load()
@@ -51,10 +69,13 @@ def render_prompt_block() -> str:
         out.append(line)
 
     out.append("\n## 口径规则（违反即为错误）")
-    out.extend(f"- {c}" for c in model.get("conventions", []))
+    out.extend(f"- {c}" for c in _conventions(model))
 
+    examples = model.get("examples", [])
+    if dialect.engine() == "postgres":
+        examples = model.get("examples_postgres") or examples
     out.append("\n## 示例")
-    for e in model.get("examples", []):
+    for e in examples:
         out.append(f"问题：{e['q']}\nSQL：{' '.join(str(e['sql']).split())}")
     return "\n".join(out)
 

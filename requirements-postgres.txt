@@ -1,0 +1,4 @@
+# 只有用 PostgreSQL（DATABASE_URL=postgresql://...）时才需要装：
+#   pip install -r requirements-postgres.txt
+# demo 默认跑 SQLite，不装这个也能跑，镜像也不用为它变大。
+psycopg[binary]==3.3.6

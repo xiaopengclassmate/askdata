@@ -1,12 +1,15 @@
 """生成演示业务库：连锁零售电商，约 6000 笔订单 / 2 年数据。
 
-用法：  python db/seed.py            # 默认重建 db/askdata.db
-        python db/seed.py --orders 20000
+用法：  python db/seed.py                       # 默认重建 db/askdata.db（SQLite）
+        python db/seed.py --orders 20000        # 换订单量
+        python db/seed.py --url postgresql://postgres@localhost:5432/askdata
+                                                # 灌进 PostgreSQL（同一份数据、同一个随机种子）
 
 设计要点：
   · 固定随机种子，同一份代码每次跑出来的数据一样，评测集才能复现
   · 收入带季节性和门店差异，这样「上月环比」「华南区占比」这类问题才有非平凡答案
   · 故意留一点脏数据（少量未支付订单、部分退款），用来验证模型生成的 where 条件
+  · 两种引擎生成的数据必须逐行一致，否则「换库」这件事没法验证
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parent
 DB_PATH = BASE / "askdata.db"
 SCHEMA_PATH = BASE / "schema.sql"
+SCHEMA_PG_PATH = BASE / "schema_pg.sql"
 
 STORES = [
     ("深圳南山店", "深圳", "华南"),
@@ -69,21 +73,59 @@ def month_factor(month: int) -> float:
             7: 0.95, 8: 0.93, 9: 1.0, 10: 1.05, 11: 1.45, 12: 1.35}[month]
 
 
-def build(orders_count: int) -> None:
+class _Writer:
+    """两种引擎的写入差异只有三处：连接、占位符、建表脚本。收在这里，灌数逻辑只写一份。"""
+
+    def __init__(self, url: str | None = None) -> None:
+        self.is_pg = bool(url)
+        if self.is_pg:
+            import psycopg
+
+            self.conn = psycopg.connect(url)
+            self.placeholder = "%s"
+            schema_sql = SCHEMA_PG_PATH.read_text(encoding="utf-8")
+        else:
+            self.conn = sqlite3.connect(DB_PATH)
+            self.placeholder = "?"
+            schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
+
+        # 逐条执行：建表脚本里有 DROP/CREATE/INDEX，一次执行多条在各驱动上行为不一致
+        for statement in schema_sql.split(";"):
+            body = "\n".join(
+                line for line in statement.splitlines() if not line.strip().startswith("--")
+            ).strip()
+            if body:
+                self.conn.execute(body)
+
+    def many(self, sql: str, rows: list[tuple]) -> None:
+        if not rows:
+            return
+        sql = sql.replace("?", self.placeholder)
+        if self.is_pg:
+            with self.conn.cursor() as cur:
+                cur.executemany(sql, rows)
+        else:
+            self.conn.executemany(sql, rows)
+
+    def close(self) -> None:
+        self.conn.commit()
+        self.conn.close()
+
+
+def build(orders_count: int, url: str | None = None) -> None:
     random.seed(20260101)
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    conn = _Writer(url)
 
-    conn.executemany(
+    conn.many(
         "INSERT INTO store(id, name, city, region, opened_at) VALUES (?,?,?,?,?)",
         [(i + 1, n, c, r, "2019-06-01") for i, (n, c, r) in enumerate(STORES)],
     )
-    conn.executemany(
+    conn.many(
         "INSERT INTO category(id, name, parent_name) VALUES (?,?,?)",
         [(i + 1, n, p) for i, (n, p) in enumerate(CATEGORIES)],
     )
-    conn.executemany(
+    conn.many(
         "INSERT INTO product(id, name, category_id, price, cost, status) "
         "VALUES (?,?,?,?,?,?)",
         [
@@ -104,7 +146,7 @@ def build(orders_count: int) -> None:
             random.choices(["普通", "银卡", "金卡"], [0.7, 0.22, 0.08])[0],
             reg.isoformat(),
         ))
-    conn.executemany(
+    conn.many(
         "INSERT INTO customer(id, name, gender, birthday, city, level, registered_at) "
         "VALUES (?,?,?,?,?,?,?)", customers,
     )
@@ -166,16 +208,16 @@ def build(orders_count: int) -> None:
                     created,
                 ))
 
-    conn.executemany(
+    conn.many(
         "INSERT INTO orders(id, order_no, customer_id, store_id, status, channel, "
         "total_amount, discount_amount, paid_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
         order_rows,
     )
-    conn.executemany(
+    conn.many(
         "INSERT INTO order_item(id, order_id, product_id, quantity, unit_price, amount) "
         "VALUES (?,?,?,?,?,?)", item_rows,
     )
-    conn.executemany(
+    conn.many(
         "INSERT INTO refund(id, order_id, order_item_id, reason, amount, status, created_at) "
         "VALUES (?,?,?,?,?,?,?)", refund_rows,
     )
@@ -188,23 +230,25 @@ def build(orders_count: int) -> None:
             for pid in range(1, len(PRODUCTS) + 1):
                 snaps.append((store_id, pid, snap_day,
                               random.randint(0, 200), random.randint(0, 30)))
-    conn.executemany(
+    conn.many(
         "INSERT INTO inventory_snapshot(store_id, product_id, snapshot_date, stock, sold) "
         "VALUES (?,?,?,?,?)", snaps,
     )
 
-    conn.commit()
     conn.close()
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--orders", type=int, default=6000)
-    args = ap.parse_args()
-    build(args.orders)
+def _report(url: str | None) -> None:
+    if url:
+        import psycopg
 
-    conn = sqlite3.connect(DB_PATH)
-    print(f"数据库：{DB_PATH}")
+        conn = psycopg.connect(url)
+        label = url
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        label = str(DB_PATH)
+
+    print(f"数据库：{label}")
     for table in ("store", "category", "product", "customer", "orders",
                   "order_item", "refund", "inventory_snapshot"):
         n = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -215,6 +259,19 @@ def main() -> None:
     ).fetchone()[0]
     print(f"  累计实收（不含取消单）：{revenue}")
     conn.close()
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--orders", type=int, default=6000)
+    ap.add_argument(
+        "--url", default="",
+        help="postgresql://user:pass@host:5432/db；不填则重建本地 SQLite",
+    )
+    args = ap.parse_args()
+    url = args.url or None
+    build(args.orders, url)
+    _report(url)
 
 
 if __name__ == "__main__":

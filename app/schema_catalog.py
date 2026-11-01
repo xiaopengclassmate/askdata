@@ -55,7 +55,7 @@ TABLE_DOCS: dict[str, dict] = {
             "id": "客户 ID",
             "name": "客户姓名",
             "gender": "性别（男 / 女）",
-            "birthday": "生日，算年龄用 date('now') - birthday",
+            "birthday": "生日，算年龄用「当前日期 - birthday」",
             "city": "客户所在城市（与门店城市可能不同）",
             "level": "会员等级：普通 / 银卡 / 金卡",
             "registered_at": "注册日期",

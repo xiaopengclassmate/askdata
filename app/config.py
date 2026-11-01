@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     dashscope_model: str = "qwen-plus"
     dashscope_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
+    # 数据源：留空用本地 SQLite 文件（demo 默认，不用起服务）；
+    # 填 postgresql://user:pass@host:5432/db 就走真实数仓，方言和权限实现跟着切换。
+    database_url: str = ""
+    # 真实数仓的会话时区。两个引擎统一到 UTC，「最近 30 天」这类口径才不会差一天。
+    db_timezone: str = "UTC"
+
     query_max_rows: int = 200
     query_timeout_seconds: float = 5.0
 

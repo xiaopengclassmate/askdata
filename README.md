@@ -56,11 +56,13 @@
 - [x] 含糊问题反问：既没指标也没维度时先问清楚，不硬猜
 - [x] FastAPI 接口：`/health` `/api/schema` `/api/query` `/api/ask` `/api/session/{id}`
 - [x] Vue 3 + ECharts 前端（按需引入，构建产物 579 kB），构建后由 FastAPI 直接托管
-- [x] 行级权限：按身份过滤门店，用 SQLite TEMP VIEW 在数据库层生效，模型全程无感
+- [x] 行级权限：按身份过滤门店，用临时视图在数据库层生效，模型全程无感
+- [x] 双引擎：SQLite（demo 默认）/ PostgreSQL（`DATABASE_URL` 一键切换），方言、只读、超时、权限各自适配
+- [x] 86 条标准 SQL 双引擎结果集逐条比对（`tests/test_dialect_parity.py`）
 - [x] 结果自检：SQL 合法但跑出空结果（0 行 / 聚合 NULL）时回喂模型重写
 - [x] 前端可「复制 SQL / 导出 CSV」（CSV 带 BOM，Excel 打开中文不乱码）
 - [x] 裸 SQL 口 `/api/query` 生产默认关闭（`ENABLE_RAW_SQL=false` 后一律 404）
-- [x] 单测 91 条（安全网关 / 语义层 / 会话 / 反问 / 链路 / 限流 / 结果自检 / 行级权限 / 接口层）
+- [x] 单测 96 条（SQLite）/ 98 条（接上 PostgreSQL 后同一套全绿）
 - [x] 60 条开发集 + 结果集比对脚本 `eval/run_eval.py`（full / baseline 消融）
 - [x] 20 条留出集 `eval/questions-holdout.yml`（写完冻结，用来验证不是调出来的）
 - [x] 公网保护：每 IP 限流 + 全局日配额 + 并发闸门（`app/ratelimit.py`）
@@ -71,7 +73,7 @@
 
 待做：
 
-- [ ] 换 PostgreSQL 接真实数仓
+- [ ] 评测集扩到 200 条，按题型（单表 / join / 时间口径 / 退款 / 库存）分类归因
 
 ## 目录
 
@@ -79,14 +81,16 @@
 askdata/
 ├── app/
 │   ├── config.py            # .env 配置
-│   ├── db.py                # 只读连接 + 超时执行 + EXPLAIN 预编译
+│   ├── db.py                # 数据库访问入口（转给当前引擎）
+│   ├── dialect.py           # 当前 SQL 方言（决定提示词怎么说时间）
+│   ├── backends/            # 引擎实现：sqlite.py / postgres.py，接口在 base.py
 │   ├── schema_catalog.py    # 中文语义目录（喂给模型的 schema 知识）
 │   ├── sql_guard.py         # 安全网关（纯函数，好写单测）
 │   ├── semantic.py          # 语义层加载 + join 白名单校验
 │   ├── clarify.py           # 含糊问题反问（纯规则）
 │   ├── session.py           # 多轮会话上下文（内存 + TTL）
 │   ├── sanity.py            # 结果自检（SQL 合法但返回空 → 判可疑，回喂重写）
-│   ├── permissions.py       # 行级权限（按身份建 TEMP VIEW，数据库层过滤）
+│   ├── permissions.py       # 行级权限（按身份建临时视图，数据库层过滤）
 │   ├── ratelimit.py         # 公网保护：每 IP 限流 / 日配额 / 并发闸门
 │   ├── logging_setup.py     # 结构化日志（一行一条 key=value）
 │   ├── llm.py               # DashScope 兼容接口 + JSON 容错解析
@@ -95,19 +99,21 @@ askdata/
 ├── semantic_layer/
 │   └── retail.yml           # 指标口径 / 时间约定 / 已批准 join
 ├── db/
-│   ├── schema.sql           # 8 张表
-│   └── seed.py              # 造数（固定种子）
+│   ├── schema.sql           # 8 张表（SQLite）
+│   ├── schema_pg.sql        # 同样的 8 张表（PostgreSQL，日期/金额用真实类型）
+│   └── seed.py              # 造数（固定种子；--url 时灌进 PostgreSQL）
 ├── eval/
-│   ├── questions.yml        # 60 条开发集 + 标准 SQL
+│   ├── questions.yml        # 60 条开发集 + 标准 SQL（sql_pg: PostgreSQL 版）
 │   ├── questions-holdout.yml# 20 条留出集（冻结，验证泛化）
 │   └── run_eval.py          # 结果集比对，full / baseline 两种模式
-├── tests/                   # 91 条单测
+├── tests/                   # 96 条单测（接上 PostgreSQL 后 98 条）
 ├── web/                     # Vue 3 + ECharts 前端
 ├── .github/workflows/ci.yml # push 时跑单测
 ├── Dockerfile               # node 构建前端 → python 运行时，单镜像
 ├── Dockerfile.prebuilt      # 小内存服务器用：dist 本地构建好，镜像里不装 node
 ├── docker-compose.prod.yml  # 线上部署（限内存 + 宿主机 .env 提供密钥）
-└── requirements.txt
+├── requirements.txt
+└── requirements-postgres.txt # 只有切 PostgreSQL 时才装
 ```
 
 ## 跑起来
@@ -217,7 +223,40 @@ TEMP VIEW 的好处是这条边界**不依赖模型的正确性**：模型写 `S
 - 响应里带 `scope` 字段，前端据此显示「当前身份：深圳南山店店长 —— 只统计你有权限的门店」，避免把部分数据当全量。
 - 未知身份返回 400 而不是悄悄降级成总部——**权限出问题时宁可报错，不能默认放行**。
 
-真实系统里身份来自登录态（用户 → 组织架构 → 可见门店），`DEMO_ROLES` 这份映射不该出现在代码里；TEMP VIEW 这套换成 PostgreSQL 就是 `SET LOCAL role` + 行级安全策略（RLS）。
+真实系统里身份来自登录态（用户 → 组织架构 → 可见门店），`DEMO_ROLES` 这份映射不该出现在代码里；临时视图这套换成 PostgreSQL 也照样能用（见下一节）。
+
+## 换引擎：SQLite → PostgreSQL
+
+demo 默认 SQLite 是为了零依赖能跑，但真实业务都在 PostgreSQL / 数仓里。**换库不该是重写**，所以存储层先抽了一层（`app/backends/`），三个方法定契约，各自实现：
+
+| | SQLite | PostgreSQL |
+|---|---|---|
+| 怎么连 | `mode=ro` 打开文件 | 连接 + 会话级 `default_transaction_read_only = on` |
+| 超时 | `set_progress_handler` 自己数指令 | `SET statement_timeout`，服务端到点中断 |
+| 行级权限 | `CREATE TEMP VIEW`（temp schema 优先于 main） | 同样是临时视图，但要看 `search_path` 认 pg_temp |
+| 编译器报错 | `EXPLAIN` | `EXPLAIN (FORMAT JSON)` |
+| 类型 | REAL / TEXT | numeric / date / timestamp（返回值归一化成 float / ISO 字符串） |
+
+切换只要三行：
+
+```bash
+pip install -r requirements-postgres.txt
+psql "$DATABASE_URL" -f db/schema_pg.sql          # 或直接 python db/seed.py --url ...
+export DATABASE_URL=postgresql://user:pass@host:5432/askdata
+```
+
+**方言要跟着换，不只是驱动。** 模型只会照着喂给它的写法写 SQL，提示词里不换，它会在 PostgreSQL 上生成 `date('now','-30 days')`。所以：
+
+- 系统提示里的引擎名、`semantic_layer/retail.yml` 里的时间口径（`@time` 占位符按引擎展开）和示例 SQL 都分两份
+- 评测集里同一条题有 `sql` 和 `sql_pg` 两个标准答案，跑哪套看当前引擎
+
+**怎么证明换过去没换错**（`tests/test_dialect_parity.py`）：评测集 86 条标准 SQL 在两套引擎上逐条执行，**结果集必须完全一致**——行数、每一行的值都对。这不是「SQL 改得像」，是同一批数据同一批问题必须出同一个答案。
+
+一个真实的坑：SQLite 的 `date('now','-30 days')` 是**日期边界**（当天零点），PostgreSQL 照直翻译成 `now() - interval '30 days'` 会带上当前时刻，少算半天，差出几十行。PG 版得写 `current_date - 30`。这种差异只有把两边跑一遍才看得见。
+
+另一个：会话时区固定 UTC（`DB_TIMEZONE`）。SQLite 的 `now` 本来就是 UTC，两边不对齐，「最近 N 天」在晚上八点之后就会差一天。
+
+> 线上容器仍然用 SQLite：那台 1.7G 的机器再起一个 PG 实例没必要，demo 的数据量也吃不出差别。双引擎的价值在于「换库是改配置，不是改代码」，而不是为了演示而演示。
 
 ## 业务口径（写在这里，也写进了 schema 目录）
 
@@ -257,7 +296,8 @@ TEMP VIEW 的好处是这条边界**不依赖模型的正确性**：模型写 `S
 4. **错误自修复**：执行报错时把数据库原文回喂模型重试（最多 3 次尝试），比调 prompt 更有效。
 5. **列形状单独成段、贴在问题后面**：问「哪个最」该出几列几行、问「前 5」该不该带指标列，这套规则放系统提示里模型经常不听话，贴近问题的位置才稳定（见下方评测里的 `SHAPE_HINT`）。
 6. **结果自检**：报错自修复只管「跑不起来」，但更常见的错法是 SQL 合法、跑出来是空的——聚合被 WHERE 全过滤掉返回 `NULL`，或者筛选值写成了库里不存在的叫法（模型很爱把「线上」扩写成「线上渠道」）。这两种没有任何异常可回喂，所以加一道按**结果**判的检查：0 行 / 单值 `NULL` 就判可疑，把原因当错误提回去让它重写。刻意判得很窄——`0`、负数、并列、超预期的大数一律不管，那些要么合法，要么得靠业务知识才判得了，硬判必然误伤正确答案。
-7. **权限下沉到数据库，不进提示词、不改写 SQL**：模型生成的 SQL 不该和用户身份绑定。用 TEMP VIEW 让 SQLite 自己把 `FROM orders` 改道到过滤后的视图，模型无感、不会被绕、也不存在「拼接漏了一种写法」的越权口子（详见上方「行级权限」）。
+7. **权限下沉到数据库，不进提示词、不改写 SQL**：模型生成的 SQL 不该和用户身份绑定。用临时视图让数据库自己把 `FROM orders` 改道到过滤后的视图，模型无感、不会被绕、也不存在「拼接漏了一种写法」的越权口子（详见上方「行级权限」）。
+8. **换库是换配置，不是重写**：存储层抽成 `execute / dry_plan / table_stats` 三个方法，SQLite 和 PostgreSQL 各自实现；连**提示词里的方言**也跟着引擎走，否则换库之后模型会照着老语法写。验证方式不是「看起来能跑」，而是 86 条标准 SQL 在两边逐条比对结果集（详见「换引擎」）。
 
 ## 评测结果（2026-11-01 定稿）
 

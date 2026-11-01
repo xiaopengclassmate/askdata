@@ -63,16 +63,28 @@ metrics:
 conventions:
   - 时间筛选一律用 orders.paid_at，不要用 id 或 created_at 判断成交时间
   - 成交单价用 order_item.unit_price，不是 product.price
-  - 「上月」指上一个自然月（date('now','start of month','-1 month') 到下月初）
-  - 「今年」指 date('now','start of year') 至今，不是本月、不是近 12 个月
-  - 「去年」指 date('now','start of year','-1 year') 到 date('now','start of year')
-  - 「最近 N 天」用 paid_at >= date('now','-N days')
+  - "@time"   # 方言相关的时间口径，渲染时按当前引擎展开（见 conventions_time）
   - 客户所在城市 customer.city 与门店城市 store.city 是两回事，问"门店"用 store.city
   - inventory_snapshot 是每日日终快照，库存只能取最新一天 snapshot_date = (SELECT MAX(snapshot_date) FROM inventory_snapshot)，跨日求和会把 30 天的量重复累加
   - 「昨天 / 最近一天 / 当日销量」用最新快照日的 inventory_snapshot.sold 汇总，不要用 paid_at 过滤 orders 倒推
   - 库存快照目前只有深圳南山店、广州天河店有数据，问其他门店要说明无数据
   - 「退款率」的分母是已完成订单，不是全部订单
   - 退款相关的时间筛选用 refund.created_at，不是 orders.paid_at（退款发生在成交之后）
+
+# ---- 时间口径：同一句话，两种引擎的日期函数写法完全不同 ----
+# 渲染 conventions 时遇到 "@time" 就换成当前引擎这一段，
+# 否则换到 PostgreSQL 之后模型还会照着 date('now') 写。
+conventions_time:
+  sqlite:
+    - 「上月」指上一个自然月（date('now','start of month','-1 month') 到下月初）
+    - 「今年」指 date('now','start of year') 至今，不是本月、不是近 12 个月
+    - 「去年」指 date('now','start of year','-1 year') 到 date('now','start of year')
+    - 「最近 N 天」用 paid_at >= date('now','-N days')
+  postgres:
+    - 「上月」指上一个自然月（date_trunc('month', now()) - interval '1 month' 到 date_trunc('month', now())）
+    - 「今年」指 date_trunc('year', now()) 至今，不是本月、不是近 12 个月
+    - 「去年」指 date_trunc('year', now()) - interval '1 year' 到 date_trunc('year', now())
+    - 「最近 N 天」用 paid_at >= current_date - N（current_date 是日期边界，now() - interval 会带上时刻，少算半天）
 
 # ---- 已批准的 join：不在表里的组合视为语义错误 ----
 approved_joins:
@@ -101,4 +113,21 @@ examples:
              ROUND(SUM(o.total_amount - o.discount_amount), 2) AS revenue
       FROM orders o JOIN store s ON s.id = o.store_id
       WHERE o.status <> '已取消' AND o.paid_at >= date('now', '-30 days')
+      GROUP BY s.name ORDER BY revenue DESC
+
+# ---- PostgreSQL 版的同样两题：方言不同，口径一字不差 ----
+examples_postgres:
+  - q: 上个月的总营收是多少
+    sql: >
+      SELECT ROUND(SUM(total_amount - discount_amount), 2) AS revenue
+      FROM orders
+      WHERE status <> '已取消'
+        AND paid_at >= date_trunc('month', now()) - interval '1 month'
+        AND paid_at <  date_trunc('month', now())
+  - q: 最近 30 天各门店的订单量和实收，按实收降序
+    sql: >
+      SELECT s.name AS store, COUNT(DISTINCT o.id) AS order_cnt,
+             ROUND(SUM(o.total_amount - o.discount_amount), 2) AS revenue
+      FROM orders o JOIN store s ON s.id = o.store_id
+      WHERE o.status <> '已取消' AND o.paid_at >= current_date - 30
       GROUP BY s.name ORDER BY revenue DESC
