@@ -496,8 +496,8 @@
 
 - cat: topn
   batch: v2
-  q: 退款金额最高的 3 笔订单
-  sql: "SELECT o.order_no, ROUND(r.amount, 2) FROM refund r JOIN orders o ON o.id = r.order_id WHERE r.status = '已退款' ORDER BY 2 DESC LIMIT 3"
+  q: 退款金额最高的 2 笔订单
+  sql: "SELECT o.order_no, ROUND(r.amount, 2) FROM refund r JOIN orders o ON o.id = r.order_id WHERE r.status = '已退款' ORDER BY 2 DESC LIMIT 2"
 
 - cat: topn
   batch: v2
@@ -511,8 +511,8 @@
 
 - cat: topn
   batch: v2
-  q: 客户数最多的城市
-  sql: "SELECT city, COUNT(*) FROM customer GROUP BY city ORDER BY 2 DESC LIMIT 1"
+  q: 客户数最少的城市
+  sql: "SELECT city, COUNT(*) FROM customer GROUP BY city ORDER BY 2 ASC LIMIT 1"
 
 - cat: topn
   batch: v2

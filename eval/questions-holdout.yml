@@ -204,13 +204,13 @@
 
 - cat: topn
   batch: v2
-  q: 单笔订单里买最多件商品的是哪一单
-  sql: "SELECT o.order_no FROM order_item i JOIN orders o ON o.id = i.order_id WHERE o.status <> '已取消' GROUP BY o.order_no ORDER BY SUM(i.quantity) DESC LIMIT 1"
+  q: 单笔订单金额最高的门店是哪一家
+  sql: "SELECT s.name FROM orders o JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' GROUP BY s.name ORDER BY MAX(o.total_amount - o.discount_amount) DESC LIMIT 1"
 
 - cat: topn
   batch: v2
-  q: 复购次数最多的客户是谁
-  sql: "SELECT c.name FROM orders o JOIN customer c ON c.id = o.customer_id WHERE o.status <> '已取消' GROUP BY c.name ORDER BY COUNT(*) DESC LIMIT 1"
+  q: 哪个门店卖出的商品件数最多
+  sql: "SELECT s.name FROM order_item i JOIN orders o ON o.id = i.order_id JOIN store s ON s.id = o.store_id WHERE o.status <> '已取消' GROUP BY s.name ORDER BY SUM(i.quantity) DESC LIMIT 1"
 
 - cat: topn
   batch: v2

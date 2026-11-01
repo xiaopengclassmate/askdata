@@ -82,6 +82,9 @@ def test_all_eval_sql_matches_between_engines(backends):
         if _norm(a.rows, a.columns) != _norm(b.rows, b.columns):
             mismatched.append(f"{label}: 结果不同（SQLite {len(a.rows)} 行 / PG {len(b.rows)} 行）")
 
+    # CI 里跑挂时，每条差异都变成一条 annotation，不用登进去翻日志才知道差在哪几题
+    for m in mismatched[:10]:
+        print(f"::error title=双引擎结果不一致::{m}")
     assert not mismatched, "两个引擎结果不一致：\n" + "\n".join(mismatched)
 
 

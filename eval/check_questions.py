@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -42,8 +43,15 @@ CATEGORIES = {
 # SQLite 专有写法：出现这些就该配一份 sql_pg
 _SQLITE_ONLY = ("date('now'", "strftime(", "date(paid_at")
 
+_LIMIT = re.compile(r"LIMIT\s+(\d+)\s*$", re.I)
+
 
 def _norm(columns: list[str], rows: list[dict]) -> list[tuple]:
+    """按列位置取值、数值留 2 位、**排序后再比**。
+
+    排序是必须的：GROUP BY 的行序在两个引擎里本来就不保证一致，
+    不排序会把「顺序不同」误报成「结果不同」。
+    """
     out = []
     for row in rows:
         vals = []
@@ -51,12 +59,37 @@ def _norm(columns: list[str], rows: list[dict]) -> list[tuple]:
             v = row.get(c)
             vals.append(round(v, 2) if isinstance(v, float) else v)
         out.append(tuple(vals))
-    return out
+    return sorted(out, key=lambda t: tuple(str(x) for x in t))
 
 
 def _run(sql: str, backend) -> tuple[list[str], list[dict]]:
     result = backend.execute(sql, timeout=30, scope=None)
     return result.columns, result.rows
+
+
+def _tie_at_cut(sql: str, columns: list[str], rows: list[dict], backend) -> str:
+    """LIMIT 边界上有没有并列：有的话这题**没有唯一答案**，两个引擎可以各挑一行。
+
+    多取一行就能看出来：第 k 名和第 k+1 名的指标列相同，说明名次是靠运气排的。
+    只看得到一列（问「哪个」）时没法比，这种得多半人工看一眼。
+    """
+    match = _LIMIT.search(sql)
+    if not match or len(columns) < 2:
+        return ""
+    k = int(match.group(1))
+    try:
+        _, more = _run(sql[: match.start()] + f"LIMIT {k + 1}", backend)
+    except Exception:
+        return ""
+    if len(more) <= k:
+        return ""
+    last = columns[-1]
+    return (
+        f"第 {k} 名和第 {k + 1} 名的「{last}」都是 {more[k - 1].get(last)}，"
+        "答案不唯一"
+        if more[k - 1].get(last) == more[k].get(last)
+        else ""
+    )
 
 
 def check_file(path: Path, backend, compare_engine) -> list[str]:
@@ -91,6 +124,10 @@ def check_file(path: Path, backend, compare_engine) -> list[str]:
             problems.append(f"{tag}：标准 SQL 返回 0 行")
         elif len(rows) == 1 and len(columns) == 1 and rows[0].get(columns[0]) is None:
             problems.append(f"{tag}：标准 SQL 单值聚合为 NULL")
+        else:
+            tie = _tie_at_cut(sql, columns, rows, backend)
+            if tie:
+                problems.append(f"{tag}：{tie}")
 
         # 两引擎结果集比对：只对给了 sql_pg 的题做
         if compare_engine is not None and item.get("sql_pg"):
